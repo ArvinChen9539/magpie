@@ -1,12 +1,34 @@
 package testenv
 
 import (
+	"context"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
+	"time"
 )
+
+func TestWarmProgramDeadline(t *testing.T) {
+	path, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("MAGPIE_TEST_WARM_CHILD", "1")
+	err = runWarmProgram(path, 0, time.Second, "-test.run=^TestWarmProgramChild$")
+	if !errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), path) {
+		t.Fatalf("warm-up returned %v, want a timeout naming %s", err, path)
+	}
+}
+
+func TestWarmProgramChild(t *testing.T) {
+	if os.Getenv("MAGPIE_TEST_WARM_CHILD") == "1" {
+		time.Sleep(6 * time.Second)
+	}
+}
 
 // A program Program writes runs what it was given; when its test ends, the
 // file goes back to the pool and the next test's program is that same

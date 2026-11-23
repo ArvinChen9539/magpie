@@ -2,13 +2,16 @@ package testenv
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"sync"
 	"testing"
+	"time"
 )
 
 // Program writes script, a `#!` script, at path as a program a test runs,
@@ -131,14 +134,27 @@ func warmAt(path string) error {
 	}
 	// run as a test's code runs it (proc.Command is out of reach: proc's
 	// own tests use this package), on macOS only, so no console to hide
-	p, err := os.StartProcess(path, []string{path}, &os.ProcAttr{})
-	if err != nil {
-		return fmt.Errorf("testenv.Program: a first run of %s: %v", path, err)
-	}
-	if st, err := p.Wait(); err != nil || !st.Success() {
-		return fmt.Errorf("testenv.Program: a first run of %s: %v %v", path, st, err)
+	if err := runWarmProgram(path, 0, time.Minute); err != nil {
+		return err
 	}
 	return record(path)
+}
+
+func runWarmProgram(path string, exitCode int, limit time.Duration, args ...string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), limit)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, path, args...)
+	err := cmd.Run()
+	if ctx.Err() != nil {
+		return fmt.Errorf("testenv.Program: a first run of %s: %w", path, ctx.Err())
+	}
+	if cmd.ProcessState != nil && cmd.ProcessState.ExitCode() == exitCode {
+		return nil
+	}
+	if err == nil {
+		return fmt.Errorf("testenv.Program: a first run of %s: exited 0, want %d", path, exitCode)
+	}
+	return fmt.Errorf("testenv.Program: a first run of %s: %w", path, err)
 }
 
 // record notes path as a file that has run once.
