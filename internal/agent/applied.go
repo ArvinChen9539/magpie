@@ -370,6 +370,9 @@ func (m *valueMemo) in(a *Agent, f Field, v string, vals map[string]string, opts
 	if v == "" {
 		return false
 	}
+	if a.modelAliasRef != nil && !prefixed(v) && strings.Count(v, "/") >= 2 {
+		return magpieValueIn(a, f, v, vals, opts)
+	}
 	var k strings.Builder
 	k.WriteString(a.ID + "\x00" + f.Key + "\x00" + v)
 	keys := make([]string, 0, len(vals))
@@ -413,7 +416,15 @@ func magpieValueIn(a *Agent, f Field, v string, vals map[string]string, opts fie
 		return false
 	}
 	v, _, one := a.split(v)
-	if !one || a.Spelled != nil && !a.Spelled(v) {
+	if !one {
+		return false
+	}
+	if a.modelAliasRef != nil {
+		if ref, handled := a.modelAliasRef(v); handled {
+			return ref != ""
+		}
+	}
+	if a.Spelled != nil && !a.Spelled(v) {
 		return false
 	}
 	if isMagpie(v) {

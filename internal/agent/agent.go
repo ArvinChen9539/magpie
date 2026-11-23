@@ -330,7 +330,8 @@ type Agent struct {
 	// one of the agent's own providers, never magpie's, even when magpie
 	// has a provider of the same name (OpenHanako's own
 	// deepseek/deepseek-v4-pro read as magpie's deepseek, #835).
-	Spelled func(v string) bool
+	Spelled       func(v string) bool
+	modelAliasRef func(v string) (ref string, handled bool)
 	// ModelAliases are the names the agent's model takes besides ids
 	// (Claude Code's opus, best, opusplan). One that names a field as well
 	// is the model's on the command line: magpie claude opus sets the

@@ -170,9 +170,7 @@ func openChamber(home, cfg string) *Agent {
 	// own Sync does: the two never write it in each other's
 	file := func() ocFile { return openCodeFileAt(here(""), ocPath, "opencode", block) }
 	opts := func(key string) func(map[string]string) []Option {
-		return func(cur map[string]string) []Option {
-			return withVia(ownOptions(auth, cur[key]), "opencode", magpieID+"/")
-		}
+		return openCodeOptions(auth, "opencode", oc.modelAliasRef, key)
 	}
 	// stepped off magpie: its provider goes too, when nothing else in the
 	// OpenCode config names one of its models
@@ -188,6 +186,7 @@ func openChamber(home, cfg string) *Agent {
 	}
 	return &Agent{
 		ID: "openchamber", Name: "OpenChamber", Icon: "openchamber", Aliases: []string{"chamber"}, Spelled: openCodeSpelled(ocPath, gatewayV1),
+		modelAliasRef: oc.modelAliasRef,
 		// its model requests are its OpenCode's, and counted as OpenCode's
 		Bin: "openchamber", Dir: s.dir, Path: s.prefs(),
 		Notice: func() string {

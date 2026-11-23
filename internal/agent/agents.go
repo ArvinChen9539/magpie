@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/tidwall/gjson"
 	"github.com/yetone/magpie/internal/appdir"
 	"github.com/yetone/magpie/internal/catalog"
 	"github.com/yetone/magpie/internal/edit"
@@ -471,12 +472,55 @@ func openCodeSpelled(path string, v1 func() string) func(string) bool {
 // mergeMaps, at v2.1.4); OpenChamber's provider form saves one there and
 // takes it out of provider (#3915).
 func openCodeBaseURL(path, p string) string {
-	if _, ok := edit.GetJSON(path, "providers."+p); ok {
-		base, _ := edit.GetJSON(path, "providers."+p+".settings.baseURL")
-		return base
-	}
-	base, _ := edit.GetJSON(path, "provider."+p+".options.baseURL")
+	_, base := openCodeProvider(path, p)
 	return base
+}
+
+func openCodeProvider(path, id string) (key, base string) {
+	key = "providers." + gjson.Escape(id)
+	if _, ok := edit.GetJSONRaw(path, key); ok {
+		base, _ = edit.GetJSON(path, key+".settings.baseURL")
+		return key, base
+	}
+	key = "provider." + gjson.Escape(id)
+	base, _ = edit.GetJSON(path, key+".options.baseURL")
+	return key, base
+}
+
+func openCodeAliasRef(path string, v1 func() string) func(string) (string, bool) {
+	return func(value string) (string, bool) {
+		alias, ref, ok := strings.Cut(value, "/")
+		if !ok || alias == "" || alias == magpieID || !isMagpie(ref) {
+			return "", false
+		}
+		key, base := openCodeProvider(path, alias)
+		if sameGateway(base, v1()) {
+			if _, listed := edit.GetJSONRaw(path, key+".models."+gjson.Escape(ref)); listed {
+				return ref, true
+			}
+		}
+		return "", true
+	}
+}
+
+func openCodeOptions(auth, agentID string, aliasRef func(string) (string, bool), key string) func(map[string]string) []Option {
+	return func(cur map[string]string) []Option {
+		value := cur[key]
+		ref, _ := aliasRef(value)
+		if ref == "" {
+			return withVia(ownOptions(auth, value), agentID, magpieID+"/")
+		}
+		own := slices.DeleteFunc(ownOptions(auth, ""), func(option Option) bool { return option.Value == value })
+		via := viaMagpieShared(agentID, magpieID+"/")
+		idx := slices.IndexFunc(via, func(option Option) bool { return option.Ref == ref })
+		if idx < 0 {
+			return withVia(own, agentID, magpieID+"/")
+		}
+		out := make([]Option, 0, len(own)+len(via))
+		out = append(append(out, own...), via...)
+		out[len(own)+idx].Value = value
+		return out
+	}
 }
 
 // pair joins a provider field and a model field into one "provider/model"
@@ -1268,10 +1312,9 @@ func openCodeLike(at place, id, name, icon, bin, dir, auth string, ua []string, 
 	// the file as the agent reads it: in OpenCode 2's words for an
 	// OpenCode 2, asked each time, as an update may have come since
 	file := func() ocFile { return openCodeFileAt(at, path, id, block) }
+	aliasRef := openCodeAliasRef(path, at.v1)
 	opts := func(key string) func(map[string]string) []Option {
-		return func(cur map[string]string) []Option {
-			return withVia(ownOptions(auth, cur[key]), id, magpieID+"/")
-		}
+		return openCodeOptions(auth, id, aliasRef, key)
 	}
 	get := func(k string) string { v, _ := edit.GetJSON(path, k); return v }
 	// whether a model the file names, or one OpenChamber sends to the
@@ -1312,7 +1355,7 @@ func openCodeLike(at place, id, name, icon, bin, dir, auth string, ua []string, 
 	}
 	return &Agent{
 		ID: id, Name: name, Icon: icon, Aliases: aliases, Spelled: openCodeSpelled(path, at.v1),
-		UA:  ua,
+		modelAliasRef: aliasRef, UA: ua,
 		Bin: bin, Dir: dir, Path: path,
 		Check: func() string {
 			if !usesMagpie(get("model"), file().small()) {

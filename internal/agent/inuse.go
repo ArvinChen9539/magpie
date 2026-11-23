@@ -35,6 +35,12 @@ func (a *Agent) Models() []string {
 			continue
 		}
 		m, _, _ := a.split(v)
+		if a.modelAliasRef != nil {
+			if ref, handled := a.modelAliasRef(m); handled {
+				add(modelRef(ref))
+				continue
+			}
+		}
 		r := modelRef(m)
 		if r == "" && f.Options != nil {
 			for _, o := range f.Options(vals) {
