@@ -67,7 +67,7 @@ function serve(lang, st) {
       st.probed.push(route.request().postDataJSON().source);
       await st.probeGate;
       if (st.tooBig) return json({ error: "mattpocock/skills is too big to download" }, 400);
-      return json({ source: "mattpocock/skills", kind: "github", candidates: structuredClone(candidates) });
+      return json({ source: "mattpocock/skills", kind: "github", candidates: structuredClone(st.candidates || candidates) });
     }
     if (url.pathname === "/api/library/skills/install" || url.pathname === "/api/library/market/skill") {
       st.installs.push([url.pathname.replace("/api/library/", ""), route.request().postDataJSON()]);
@@ -191,6 +191,37 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
         ["market/skill", { source: "mattpocock/skills", id: "tdd", agents: ["claude"] }],
         ["market/skill", { source: "mattpocock/skills", id: "write-a-prd", agents: ["claude"] }],
       ]);
+      assert.deepEqual(errors, []);
+    });
+
+    test(`${engine} ${lang}: filtering a skill repository installs only the visible checked skills`, async (t) => {
+      const more = ["code-review", "diagnose", "improve-codebase-architecture", "setup-matt-pocock-skills", "to-issues"];
+      const st = {
+        about: [], probed: [], installs: [], probeGate: Promise.resolve(),
+        candidates: [...candidates, ...more.map((name) => ({ name, path: `skills/${name}` }))],
+      };
+      const { page, errors } = await open(engine, lang, t, st);
+      await page.locator('.mk-card[data-id="repo:mattpocock/skills"] .mk-add').click();
+      const sheet = page.locator("#modal .mk-reposheet");
+      const filter = sheet.locator('[data-lib="repofilter"]');
+      const go = sheet.locator(".bar .primary");
+      const shown = () => sheet.locator(".lib-pick .name").allTextContents();
+      await filter.fill("review");
+      assert.deepEqual(await shown(), ["code-review"]);
+      assert.equal((await go.textContent()).trim(), w.install.replace("{n}", 0));
+      assert(await go.isDisabled());
+      assert(await filter.evaluate((input) => input === document.activeElement));
+      await sheet.locator('.lib-pick input').check();
+      assert.equal((await go.textContent()).trim(), w.one);
+      await filter.fill("no-matching-skill");
+      assert.deepEqual(await shown(), []);
+      assert(await go.isDisabled());
+      await filter.fill("");
+      assert.equal((await go.textContent()).trim(), w.install.replace("{n}", 4));
+      await filter.fill("review");
+      await go.click();
+      await sheet.waitFor({ state: "detached" });
+      assert.deepEqual(st.installs, [["skills/install", { source: "mattpocock/skills", paths: ["skills/code-review"], agents: ["claude"] }]]);
       assert.deepEqual(errors, []);
     });
   }

@@ -10030,19 +10030,29 @@ magpie.plugin("library", (ctx) => {
     const rows = () => r.found
       ? r.found.candidates.map((c) => ({ key: c.path, name: c.name, sub: c.description || c.path || "", have: c.have, as: c.as }))
       : g.skills.map((x) => ({ key: "m:" + x.skillId, name: x.name, sub: x.description || "", have: !!x.have, as: x.have && x.have !== x.name ? x.have : "" }));
-    const syncGo = () => { const n = r.pick.size; go.textContent = n === 1 ? t("Install 1 skill") : t("Install {n} skills", { n }); go.disabled = !n; };
+    const visibleRows = () => {
+      const query = r.filter.toLowerCase();
+      return rows().filter((row) => (row.name + " " + row.sub).toLowerCase().includes(query));
+    };
+    const pickedRows = () => visibleRows().filter((row) => !row.have && r.pick.has(row.key));
+    let installing = false;
+    const syncGo = () => {
+      if (installing) return;
+      const n = pickedRows().length;
+      go.textContent = n === 1 ? t("Install 1 skill") : t("Install {n} skills", { n });
+      go.disabled = !n;
+    };
+    const heading = el("div", "lib-probehead");
     const list = el("div", "lib-picks");
     const drawList = () => {
       list.replaceChildren();
-      const q = r.filter.toLowerCase();
-      for (const x of rows()) {
-        if (q && !(x.name + " " + x.sub).toLowerCase().includes(q)) continue;
+      for (const x of visibleRows()) {
         const row = el("label", "lib-pick" + (x.have ? " dim" : ""));
         const cb = el("input");
         cb.type = "checkbox";
-        cb.checked = r.pick.has(x.key);
+        cb.checked = !x.have && r.pick.has(x.key);
         cb.disabled = x.have;
-        cb.onchange = () => { if (cb.checked) r.pick.add(x.key); else r.pick.delete(x.key); draw(); };
+        cb.onchange = () => { if (cb.checked) r.pick.add(x.key); else r.pick.delete(x.key); drawHeading(); };
         const w = el("span", "who");
         w.append(el("span", "name", x.name), el("span", "sub", x.sub));
         row.append(cb, w);
@@ -10056,48 +10066,54 @@ magpie.plugin("library", (ctx) => {
     filter.type = "text";
     filter.dataset.lib = "repofilter";
     filter.placeholder = t("Filter…");
-    filter.oninput = () => { r.filter = filter.value; drawList(); };
+    filter.oninput = () => { r.filter = filter.value; drawList(); drawHeading(); };
     filter.onkeydown = (e) => e.stopPropagation();
-    function draw() {
-      const rs = rows(), fresh = rs.filter((x) => !x.have);
-      const hd = el("div", "lib-probehead");
-      hd.append(el("span", "note", rs.length === 1 ? t("1 skill in {src}", { src: g.repo }) : t("{n} skills in {src}", { n: rs.length, src: g.repo })), el("span", "grow"));
+    function drawHeading() {
+      const n = rows().length, fresh = visibleRows().filter((row) => !row.have);
+      heading.replaceChildren(el("span", "note", n === 1 ? t("1 skill in {src}", { src: g.repo }) : t("{n} skills in {src}", { n, src: g.repo })), el("span", "grow"));
       if (fresh.length > 1) {
         const allOn = fresh.every((x) => r.pick.has(x.key));
-        hd.append(button(allOn ? t("Select none") : t("Select all"), "mk-repoall", () => { for (const x of fresh) allOn ? r.pick.delete(x.key) : r.pick.add(x.key); drawList(); draw(); }));
+        heading.append(button(allOn ? t("Select none") : t("Select all"), "mk-repoall", () => { for (const x of fresh) allOn ? r.pick.delete(x.key) : r.pick.add(x.key); drawList(); drawHeading(); }));
       }
-      const parts = [hd];
-      if (rs.length > 8) parts.push(filter);
+      syncGo();
+    }
+    function draw() {
+      drawList();
+      drawHeading();
+      const parts = [heading];
+      if (rows().length > 8 || r.filter) parts.push(filter);
       parts.push(list);
       if (!r.found && !r.error) parts.push(el("div", "lib-none mk-repowait", t("Looking through the whole repository…")));
       if (r.error) parts.push(el("div", "lib-none lib-left mk-repoerr", t("Only the skills skills.sh lists from it are here: {error}", { error: r.error })));
       box.replaceChildren(...parts);
-      syncGo();
     }
-    drawList();
     draw();
     async function install() {
-      const n = r.pick.size;
+      const picked = pickedRows();
+      const n = picked.length;
+      if (installing || !n) return;
+      installing = true;
       const done = n === 1 ? t("1 skill installed") : t("{n} skills installed", { n });
       go.disabled = true;
       go.textContent = t("Installing…");
       let ok;
       if (r.found) {
-        const paths = [...r.pick];
+        const paths = picked.map((row) => row.key);
         ok = await change("skills/install", { source: r.found.source, paths, agents: r.agents }, done);
         if (ok) for (const c of r.found.candidates) if (paths.includes(c.path)) c.have = true;
       }
       else {
         // one at a time, as each card's Add does
-        const picked = g.skills.filter((x) => r.pick.has("m:" + x.skillId));
+        const keys = new Set(picked.map((row) => row.key));
+        const selected = g.skills.filter((x) => keys.has("m:" + x.skillId));
         ok = true;
-        for (const [i, x] of picked.entries()) {
-          if (!await change("market/skill", { source: x.source, id: x.skillId, agents: r.agents }, i === picked.length - 1 ? done : "")) { ok = false; break; }
+        for (const [i, x] of selected.entries()) {
+          if (!await change("market/skill", { source: x.source, id: x.skillId, agents: r.agents }, i === selected.length - 1 ? done : "")) { ok = false; break; }
           x.have = x.name;
         }
       }
       if (ok) { closeLibModal(true); drawMarket("skills"); }
-      else if (go.isConnected) syncGo();
+      else if (go.isConnected) { installing = false; drawList(); drawHeading(); }
     }
     modal = { save: () => { if (!go.disabled) go.click(); } };
     openLib(ed);
@@ -10113,7 +10129,6 @@ magpie.plugin("library", (ctx) => {
         if (c && !c.have) pick.add(c.path);
       }
       Object.assign(r, { found: p, pick });
-      drawList();
       draw();
     };
     const key = g.repo.toLowerCase();
