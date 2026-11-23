@@ -2820,7 +2820,11 @@ func weighRouted(p provider.Provider, cs []candidate, model string, from provide
 		}
 		if ok {
 			u, r := a.For(m, now)
-			pc, due := a.Pace(m, now)
+			var caps provider.WindowCaps
+			if acct := c.p.Account; p.Routing == provider.Pace && acct != nil && !c.p.IsRemoteMagpie() && !(acct.Agent == "codex" && freeOnChatGPT(m, acct.Plan)) {
+				caps = c.p.CapsOf(acct.User)
+			}
+			pc, due := a.PaceWithCaps(m, now, caps)
 			amt, of, unit := a.Count(m, now)
 			rs := a.Restarts(now)
 			l := left{used: u, renews: r, fullest: a.Fullest(m, now), fullestName: a.FullestName(m, now), soon: a.Renewal(m, now), unreached: a.Unreached(m, now), lapse: a.Lapse(m, now), lapsing: a.Lapsing(m, now), pace: pc, due: due, amount: amt, of: of, unit: unit,

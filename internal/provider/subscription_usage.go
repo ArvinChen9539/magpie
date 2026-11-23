@@ -90,9 +90,10 @@ type QuotaWindow struct {
 	// ("opus"), when it doesn't count them all; and Aside when using it up
 	// doesn't stop the account — on-demand spending past the allowance,
 	// or Copilot's code completions, which no request here makes.
-	Span  time.Duration `json:"-"`
-	Model string        `json:"-"`
-	Aside bool          `json:"-"`
+	Span    time.Duration `json:"-"`
+	Model   string        `json:"-"`
+	Aside   bool          `json:"-"`
+	paceCap float64
 	// Credits is set on each window of a ChatGPT account that holds
 	// credits (has_credits with a balance left, or unlimited): using the
 	// window up doesn't stop it, the vendor spends the credits instead
@@ -291,7 +292,7 @@ type SubscriptionQuota struct {
 	// each window's json leaves out for routing (Span, Model, Aside), in
 	// the windows' order: that magpie weighs its Remote magpie by the card
 	// (RemoteAllowance, #6708). Set only as cards are told; nil elsewhere.
-	Routing []lastWindow `json:"routing,omitempty"`
+	Routing []routingWindow `json:"routing,omitempty"`
 	// routable: a remote magpie's card whose windows have Routing laid
 	// back on them (keepRemoteCards), so routing may go by them
 	routable bool

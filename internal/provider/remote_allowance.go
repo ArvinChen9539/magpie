@@ -16,11 +16,16 @@ import (
 // cards (RemoteCardsPath, read here for the Usage page): routing now goes
 // by them too, as kept here, never waiting on the network.
 //
-// A window's json leaves out what routing reads (Span, Model, Aside), so
+// A window's json leaves out its routing metadata, so
 // a magpie tells another its cards with Routing beside the windows
 // (ToldRouting), and the cards read are given them back (withRouting). A
 // card from a magpie too old to tell them isn't weighed: a "7 days ·
 // Opus" window would count against Sonnet, a five hours as a week.
+
+type routingWindow struct {
+	lastWindow
+	PaceCap float64 `json:"paceCap,omitempty"`
+}
 
 // ToldRouting is cs, each card with its windows' Routing, for another
 // magpie: the gateway's answer of RemoteCardsPath.
@@ -28,9 +33,17 @@ func ToldRouting(cs []SubscriptionQuota) []SubscriptionQuota {
 	out := make([]SubscriptionQuota, len(cs))
 	for i, q := range cs {
 		if len(q.Windows) > 0 {
-			q.Routing = make([]lastWindow, len(q.Windows))
+			var caps WindowCaps
+			if q.From == "" && q.Kind == "subscription" {
+				caps = AccountCapsOf(q.Provider, q.User)
+			}
+			q.Routing = make([]routingWindow, len(q.Windows))
 			for j, w := range q.Windows {
-				q.Routing[j] = lastWindow{w.Span, w.Model, w.Aside}
+				cap := w.paceCap
+				if share, _, _ := caps.limitShare(w.Name, w.Limit, w.Aside); share > 0 && share < 100 {
+					cap = share
+				}
+				q.Routing[j] = routingWindow{lastWindow{w.Span, w.Model, w.Aside}, cap}
 			}
 		}
 		out[i] = q
@@ -49,6 +62,9 @@ func withRouting(cs []SubscriptionQuota) []SubscriptionQuota {
 			for j, w := range q.Windows {
 				r := q.Routing[j]
 				w.Span, w.Model, w.Aside = r.Span, r.Model, r.Aside
+				if r.PaceCap > 0 && r.PaceCap < 100 {
+					w.paceCap = r.PaceCap
+				}
 				if w.Span == 0 {
 					w.Span = windowSpan(w)
 				}

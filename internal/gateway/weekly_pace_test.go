@@ -10,6 +10,45 @@ import (
 	"github.com/yetone/magpie/internal/provider"
 )
 
+func TestWeeklyPaceUsesAccountCaps(t *testing.T) {
+	fresh(t)
+	old := allowances
+	t.Cleanup(func() { allowances = old })
+	now := time.Now()
+	allowances = func(string) map[string]provider.Allowance {
+		return map[string]provider.Allowance{
+			"one@example.com": {{Name: "7 days", Used: 75, Resets: now.Add(20 * time.Hour), Span: 7 * 24 * time.Hour}},
+			"two@example.com": {{Name: "7 days", Used: 40, Resets: now.Add(93 * time.Hour), Span: 7 * 24 * time.Hour}},
+		}
+	}
+	group := provider.Provider{ID: "local-pace-caps", Routing: provider.Pace}
+	model := "claude-sonnet-5-5"
+	for _, fixture := range []struct {
+		name, want string
+		cap        int
+		override   int
+	}{
+		{"uncapped", "one@example.com", 0, 0},
+		{"capped", "two@example.com", 80, 0},
+		{"window override", "one@example.com", 80, 100},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			var candidates []candidate
+			for _, user := range []string{"one@example.com", "two@example.com"} {
+				p := provider.Provider{ID: "claude", Account: &provider.Account{Agent: "claude", User: user}, AccountCaps: map[string]int{user: fixture.cap}}
+				if user == "one@example.com" && fixture.override != 0 {
+					p.AccountWindowCaps = map[string]map[string]int{user: {"7 days": fixture.override}}
+				}
+				candidates = append(candidates, candidate{p: p, model: model, rest: user})
+			}
+			got, _ := weigh(group, candidates, model, provider.Anthropic)
+			if first := got[0].p.Account.User; first != fixture.want {
+				t.Fatalf("first %s, want %s", first, fixture.want)
+			}
+		})
+	}
+}
+
 // Use before expiry puts first the account with the most of its week left per
 // hour until it renews — the one with the most to lose at its reset — not
 // the one with the most left: 20% left and an hour to go beats 60% left

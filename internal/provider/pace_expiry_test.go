@@ -53,3 +53,13 @@ func TestAllowanceCarriesRunsOutLeft(t *testing.T) {
 		t.Fatalf("allowance %+v", a)
 	}
 }
+
+func TestPaceExpiringCreditsRespectAmountCap(t *testing.T) {
+	now := time.Now()
+	due := now.Add(10 * time.Hour)
+	allowance := Allowance{{Name: "Credits", Used: 75, Amount: 375, Of: 500, Resets: now.Add(48 * time.Hour), RunsOut: due, RunsOutLeft: 100}}
+	caps := WindowCaps{Amounts: map[string]float64{"credits": 400}}
+	if pace, deadline := allowance.PaceWithCaps("model", now, caps); pace != 0.5 || !deadline.Equal(due) {
+		t.Fatalf("pace %v by %v, want 0.5 by %v", pace, deadline, due)
+	}
+}

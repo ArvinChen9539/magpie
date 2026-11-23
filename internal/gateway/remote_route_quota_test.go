@@ -120,3 +120,53 @@ func TestRemoteMagpiesWeighedByTheirCards(t *testing.T) {
 		t.Errorf("a third magpie reads mac-b's Sonnet used %v, want 25", u)
 	}
 }
+
+func TestRemotePaceUsesAccountCaps(t *testing.T) {
+	fresh(t)
+	provider.ForgetRemoteCardsForTest()
+	t.Cleanup(provider.ForgetRemoteCardsForTest)
+	model := "claude-sonnet-5-5"
+	subscription := "test-subscription"
+	var candidates []candidate
+	for _, fixture := range []struct {
+		id, user string
+		used     float64
+		due      time.Duration
+	}{{"mac-a", "one@example.com", 75, 20 * time.Hour}, {"mac-b", "two@example.com", 40, 93 * time.Hour}} {
+		reset := time.Now().Add(fixture.due)
+		cards := []provider.SubscriptionQuota{{Provider: subscription, User: fixture.user, Kind: "subscription", Windows: []provider.QuotaWindow{
+			{Name: "7 days", Used: fixture.used, ResetsAt: &reset, Span: 7 * 24 * time.Hour},
+		}}}
+		remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path != provider.RemoteCardsPath {
+				http.NotFound(w, r)
+				return
+			}
+			json.NewEncoder(w).Encode(map[string]any{"object": "list", "data": provider.ToldRouting(cards)})
+		}))
+		t.Cleanup(remote.Close)
+		if err := provider.Save(provider.Provider{ID: fixture.id, Name: fixture.id, Preset: provider.RemoteMagpiePreset, Key: "test", Chat: remote.URL}); err != nil {
+			t.Fatal(err)
+		}
+		p, err := provider.Find(fixture.id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		candidates = append(candidates, candidate{p: *p, model: subscription + "/" + model, rest: fixture.id})
+	}
+	group := provider.Provider{ID: "remote-pace-caps", Routing: provider.Pace}
+	check := func(want string) {
+		t.Helper()
+		provider.ForgetRemoteCardsForTest()
+		provider.RemoteCards(context.Background())
+		got, weights := weigh(group, candidates, model, provider.Anthropic)
+		if len(weights.lefts) != 2 || got[0].p.ID != want {
+			t.Fatalf("first %s, want %s (allowances: %d)", got[0].p.ID, want, len(weights.lefts))
+		}
+	}
+	check("mac-a")
+	if err := provider.Save(provider.Provider{ID: subscription, Name: "Test subscription", Chat: "https://example.invalid/v1", Key: "test", AccountCaps: map[string]int{"one@example.com": 80, "two@example.com": 80}}); err != nil {
+		t.Fatal(err)
+	}
+	check("mac-b")
+}

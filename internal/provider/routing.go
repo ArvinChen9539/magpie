@@ -382,7 +382,8 @@ type Limit struct {
 	Amount, Of float64
 	Unit       string
 	matches    func(string) bool
-	partial    bool   // of a reading that may leave windows out (QuotaWindow.partial)
+	partial    bool // of a reading that may leave windows out (QuotaWindow.partial)
+	paceCap    float64
 	Name       string // QuotaWindow.Name: which window it is, one reading to the next (WindowCapID)
 	// pool is the windows of the pool a model's own window draws on
 	// (Antigravity's "Gemini · 7 days"), which hold the account at its
@@ -853,6 +854,11 @@ const FreshPace = 100 / (7 * 24.0)
 // one whose month has more left but nothing expiring (lcyksp on
 // Discord); due is then the expiry.
 func (a Allowance) Pace(model string, now time.Time) (pace float64, due time.Time) {
+	return a.PaceWithCaps(model, now, WindowCaps{})
+}
+
+// PaceWithCaps is Pace with the local account's effective caps on its windows.
+func (a Allowance) PaceWithCaps(model string, now time.Time, caps WindowCaps) (pace float64, due time.Time) {
 	model = strings.ToLower(model)
 	restart := a.Restarts(now)
 	// until is how long a window runs from now and renews when; a restart
@@ -863,7 +869,7 @@ func (a Allowance) Pace(model string, now time.Time) (pace float64, due time.Tim
 		}
 		return until, renews
 	}
-	any, used := false, 0.0
+	any, left := false, 100.0
 	short, partial, shortPace, shortDue := false, false, 0.0, time.Time{}
 	for _, l := range a {
 		if !l.applies(model) {
@@ -874,14 +880,22 @@ func (a Allowance) Pace(model string, now time.Time) (pace float64, due time.Tim
 		if !l.Resets.IsZero() && !l.Resets.After(now) {
 			u = 0 // its reset has passed: empty again
 		}
+		ceiling := 100.0
+		if l.paceCap > 0 {
+			ceiling = l.paceCap
+		}
+		if share, _, _ := caps.limitShare(l.Name, l.Of, l.aside); share > 0 {
+			ceiling = min(ceiling, share)
+		}
+		remaining := max(0, ceiling-u)
 		if l.Span != 0 && l.Span < budgetSpan {
-			used = max(used, u)
+			left = min(left, remaining)
 			until, renews := l.Span, time.Time{}
 			if l.Resets.After(now) {
 				until, renews = l.Resets.Sub(now), l.Resets
 			}
 			until, renews = cut(until, renews)
-			if p := (100 - u) / max(until, time.Hour).Hours(); !short || p < shortPace {
+			if p := remaining / max(until, time.Hour).Hours(); !short || p < shortPace {
 				shortPace, shortDue, short = p, renews, true
 			}
 			continue
@@ -894,8 +908,8 @@ func (a Allowance) Pace(model string, now time.Time) (pace float64, due time.Tim
 			until, renews = l.Resets.Sub(now), l.Resets
 		}
 		until, renews = cut(until, renews)
-		p := (100 - u) / max(until, time.Hour).Hours()
-		if q, at, ok := l.expiring(u, now, now.Add(until)); ok && q > p {
+		p := remaining / max(until, time.Hour).Hours()
+		if q, at, ok := l.expiring(remaining, ceiling < 100, now, now.Add(until)); ok && q > p {
 			p, renews = q, at
 		}
 		if !any || p < pace {
@@ -906,22 +920,25 @@ func (a Allowance) Pace(model string, now time.Time) (pace float64, due time.Tim
 		if short && !partial {
 			return shortPace, shortDue
 		}
-		return (100 - used) / weekSpan.Hours(), time.Time{}
+		return left / weekSpan.Hours(), time.Time{}
 	}
 	return pace, due
 }
 
 // expiring is the pace of what a window loses at RunsOut, when that
 // comes after now and before ends, the window's renewal: the share that
-// expires (RunsOutLeft of Of, at most all), else all it has left (100-u),
+// expires (RunsOutLeft of Of, within any cap), else all it has left,
 // per hour until then, never fewer than one.
-func (l Limit) expiring(u float64, now, ends time.Time) (pace float64, at time.Time, ok bool) {
+func (l Limit) expiring(remaining float64, capped bool, now, ends time.Time) (pace float64, at time.Time, ok bool) {
 	if !l.RunsOut.After(now) || !l.RunsOut.Before(ends) {
 		return 0, time.Time{}, false
 	}
-	share := 100 - u
+	share := remaining
 	if l.RunsOutLeft > 0 && l.Of > 0 {
 		share = min(100, 100*l.RunsOutLeft/l.Of)
+		if capped {
+			share = min(share, remaining)
+		}
 	}
 	return share / max(l.RunsOut.Sub(now), time.Hour).Hours(), l.RunsOut, true
 }
@@ -1335,7 +1352,7 @@ func allowanceOf(ws []QuotaWindow, now time.Time) Allowance {
 		if w.Aside || w.Text {
 			continue
 		}
-		l := Limit{Used: w.Used, Span: w.Span, Model: w.Model, Amount: w.Amount, Of: w.Limit, Unit: w.Unit, matches: w.matches, partial: w.partial, Name: w.Name, Credits: w.Credits, Resets: resets(w)}
+		l := Limit{Used: w.Used, Span: w.Span, Model: w.Model, Amount: w.Amount, Of: w.Limit, Unit: w.Unit, matches: w.matches, partial: w.partial, Name: w.Name, Credits: w.Credits, Resets: resets(w), paceCap: w.paceCap}
 		if ids := families[w.Model]; ids != nil && w.Family != "" && w.matches == nil {
 			l.Model = ""
 			l.matches = func(model string) bool { return ids[model] }
