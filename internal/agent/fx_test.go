@@ -3,6 +3,7 @@ package agent
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
@@ -248,6 +249,95 @@ func TestFxEffortNames(t *testing.T) {
 	}
 	if fxEfforts(nil) != nil {
 		t.Error("levels for a model without them")
+	}
+}
+
+func TestWSLFxEffortsUseDistroVersion(t *testing.T) {
+	keptEffortHome(t)
+	for _, tc := range []struct {
+		name, output, version string
+	}{
+		{"supported", "0.0.17", "0.0.17"},
+		{"older", "0.0.16", "0.0.16"},
+		{"JSON viewer", "39.2.0", ""},
+		{"unknown", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			probe := "home:/home/me\ndir:.fx\n"
+			if tc.output != "" {
+				probe += "ver:fx " + tc.output + "\n"
+			}
+			d := parseProbe("Ubuntu", probe)
+			d.Root = t.TempDir()
+			d.Running = true
+			if got := d.Versions["fx"]; got != tc.version {
+				t.Errorf("probed fx version = %q, want %q", got, tc.version)
+			}
+			a := wslAgent(wslKindOf("fx"), *d)
+			if err := a.Field("model").Set("magpie/think/deep"); err != nil {
+				t.Fatal(err)
+			}
+			const key = "providers.magpie.model_metadata.think/deep"
+			if _, ok := edit.GetJSONRaw(a.Path, key); !ok {
+				t.Fatalf("model metadata missing from %s", a.Path)
+			}
+			got, ok := edit.GetJSONRaw(a.Path, key+".reasoning_efforts.high.reasoning_effort")
+			if tc.name == "supported" {
+				if !ok || got != `"high"` {
+					t.Errorf("fx 0.0.17 high effort = %q, present = %v", got, ok)
+				}
+			} else if _, ok := edit.GetJSONRaw(a.Path, key+".reasoning_efforts"); ok {
+				t.Errorf("unexpected reasoning_efforts for %s", tc.name)
+			}
+		})
+	}
+}
+
+func TestWSLProbeFindsFxVersion(t *testing.T) {
+	sh, err := exec.LookPath("sh")
+	if err != nil {
+		t.Skip("a POSIX shell is required to run the WSL probe")
+	}
+	for _, tc := range []struct {
+		name, script, version string
+	}{
+		{"supported", "echo 0.0.17", "0.0.17"},
+		{"older", "echo 0.0.16", "0.0.16"},
+		{"JSON viewer", "echo 39.2.0", ""},
+		{"failed", "echo 0.0.17; exit 1", ""},
+		{"missing", "", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			home := t.TempDir()
+			if err := os.Mkdir(filepath.Join(home, ".fx"), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			viewer := filepath.Join(home, "path", "fx")
+			writeAt(t, viewer, "#!/bin/sh\necho 39.2.0\n")
+			if err := os.Chmod(viewer, 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if tc.script != "" {
+				bin := filepath.Join(home, ".local", "bin", "fx")
+				writeAt(t, bin, "#!/bin/sh\n[ \"$1\" = --version ] || exit 2\n"+tc.script+"\n")
+				if err := os.Chmod(bin, 0o755); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cmd := exec.Command(sh, "-s")
+			cmd.Dir = home
+			cmd.Stdin = strings.NewReader(`HOME=$(pwd); export HOME; PATH="$HOME/path:/usr/bin:/bin"; export PATH; ` +
+				`if ! command -v timeout >/dev/null 2>&1; then timeout() { shift; "$@"; }; fi; ` +
+				strings.ReplaceAll(wslProbeScript(), "/proc/mounts", "/dev/null") + "\n")
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("probe: %v\n%s", err, out)
+			}
+			d := parseProbe("Ubuntu", string(out))
+			if d == nil || !wslKindOf("fx").found(*d) || d.Versions["fx"] != tc.version {
+				t.Fatalf("probe version should be %q:\n%s", tc.version, out)
+			}
+		})
 	}
 }
 

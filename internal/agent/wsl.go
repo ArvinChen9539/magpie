@@ -1986,6 +1986,9 @@ var wslProbeScript = sync.OnceValue(func() string {
 			s += `; `
 		}
 	}
+	s += `fxbin="$HOME/.local/bin/fx"; ` +
+		`if [ -d "$HOME/.fx" ] && [ -f "$fxbin" ] && [ -x "$fxbin" ] && ! wslwin "$fxbin"; then ` +
+		`fxver=$(timeout 10 "$fxbin" --version </dev/null 2>&1) && printf 'ver:fx %s\n' "$fxver" | head -n1; fi; `
 	s += `[ -d "$HOME/` + wslCopilotDir + `" ] && echo dir:` + wslCopilotDir + `; `
 	for _, dir := range wslAntigravityDirs {
 		s += `[ -d "$HOME/` + dir + `" ] && echo dir:` + dir + `; `
@@ -2057,7 +2060,7 @@ func parseProbe(name, out string) *distro {
 			d.Has[l] = true
 		case "ver":
 			id, said, _ := strings.Cut(v, " ")
-			if ver := parseVersion(said); ver != "" {
+			if ver := parseVersion(said); ver != "" && (id != "fx" || strings.HasPrefix(ver, "0.")) {
 				if d.Versions == nil {
 					d.Versions = map[string]string{}
 				}

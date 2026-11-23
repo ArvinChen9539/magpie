@@ -10,6 +10,10 @@ something else shows up as drift.
 
 ## Responsibilities and sources of truth
 
+The WSL probe asks `~/.local/bin/fx --version` in distros with `~/.fx` and
+accepts a `0.x` version. Model metadata includes `reasoning_efforts` when
+that version is at least `0.0.17` ([`fx.go`](../../internal/agent/fx.go), #6636).
+
 | Part | Responsibility | Source |
 | --- | --- | --- |
 | Agent description | `Agent` has an id, name, icon, `Bin` and `Dir` for detection, `Path`, `Fields` and `Native`. It also has optional hooks: `Notice`, `UA`, `ListsModels`, `Sync`, `Unwire`, `Join`/`Joined`, `Routed`, `Follow`, `RenameRefs`, `Check`, `LastUsed`, `Reached`, `Import`/`Added`, `Launch`, `SplitSuffix`, `Spelled` and `ModelAliases`. Each hook's comment says which agents need it. A `Dir` holding only its `signIn` file (Codex's `auth.json`, Claude Code's `.credentials.json`), which a sign-in added in magpie writes for an agent signed in to nothing, is no sign the agent is installed (`TestSignInFileAloneIsNoAgent`; jiangshangmuyun on X). | [`agent.go`](../../internal/agent/agent.go) |

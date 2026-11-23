@@ -66,7 +66,7 @@ func fxTakesEfforts(v string) bool {
 }
 
 // fxVersion is fx's version at the place: a distro's as its probe found it
-// (none is asked yet, so "": #6636), this machine's asked of its binary.
+// (#6636), this machine's asked of its binary.
 func (p place) fxVersion() string {
 	if p.spell != nil {
 		return p.version
