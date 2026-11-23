@@ -1,5 +1,5 @@
-// Package applog writes the desktop app's log to a file, as well as to
-// stderr. The app opened from the Finder, the Dock, the Start menu or a
+// Package applog writes rotating logs for the desktop app and the TUI.
+// The desktop app also logs to stderr. The app opened from the Finder, the Dock, the Start menu or a
 // desktop launcher has no terminal: what it logged went nowhere, so a user
 // asked for magpie's log had none to send (rayem1w on X, a Codex "hit a
 // snag" through the gateway, 0.1.2330). Only the launch agent
@@ -46,6 +46,23 @@ const (
 // Path is where the desktop app writes its log.
 func Path() string { return filepath.Join(appdir.Logs(), Name) }
 
+// StartTUI keeps the standard logger off the terminal until the returned
+// function restores its previous writer. It discards logs if tui.log cannot
+// be opened.
+func StartTUI() (restore func()) {
+	previous := log.Writer()
+	w, err := openLog(filepath.Join(appdir.Logs(), "tui.log"), "tui.old.log", Limit, false)
+	if err != nil {
+		log.SetOutput(io.Discard)
+		return func() { log.SetOutput(previous) }
+	}
+	log.SetOutput(w)
+	return func() {
+		log.SetOutput(previous)
+		w.Close()
+	}
+}
+
 // current is the log this process writes, "" when it writes none, and
 // active its file.
 var (
@@ -53,8 +70,7 @@ var (
 	active  atomic.Pointer[file]
 )
 
-// Current is the log this process writes, or "" when it writes none (the
-// TUI, `magpie serve`, a command).
+// Current is the active desktop app log, or "" when it writes none.
 func Current() string {
 	if p := current.Load(); p != nil {
 		return *p
@@ -95,21 +111,26 @@ func Stop() {
 
 // file is a log file rotated at limit bytes.
 type file struct {
-	mu    sync.Mutex
-	path  string
-	old   string
-	limit int64
-	f     *os.File
-	size  int64
+	mu          sync.Mutex
+	path        string
+	old         string
+	limit       int64
+	crashOutput bool
+	f           *os.File
+	size        int64
 }
 
 // open opens the log at path to append to, making its folder, readable by
 // the user alone.
 func open(path string, limit int64) (*file, error) {
+	return openLog(path, OldName, limit, true)
+}
+
+func openLog(path, oldName string, limit int64, crashOutput bool) (*file, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return nil, err
 	}
-	w := &file{path: path, old: filepath.Join(filepath.Dir(path), OldName), limit: limit}
+	w := &file{path: path, old: filepath.Join(filepath.Dir(path), oldName), limit: limit, crashOutput: crashOutput}
 	if err := w.reopen(false); err != nil {
 		return nil, err
 	}
@@ -131,7 +152,9 @@ func (w *file) reopen(truncate bool) error {
 	if fi, err := f.Stat(); err == nil {
 		w.size = fi.Size()
 	}
-	_ = debug.SetCrashOutput(f, debug.CrashOptions{})
+	if w.crashOutput {
+		_ = debug.SetCrashOutput(f, debug.CrashOptions{})
+	}
 	return nil
 }
 
@@ -173,7 +196,9 @@ func (w *file) rotate() {
 	}
 	// the runtime holds a copy of the file for a crash's trace, and
 	// Windows moves no file with a handle open
-	_ = debug.SetCrashOutput(nil, debug.CrashOptions{})
+	if w.crashOutput {
+		_ = debug.SetCrashOutput(nil, debug.CrashOptions{})
+	}
 	w.f.Close()
 	moved := os.Rename(w.path, w.old)
 	if err := w.reopen(moved != nil); err != nil {
@@ -181,7 +206,7 @@ func (w *file) rotate() {
 		return
 	}
 	if moved != nil {
-		n, _ := fmt.Fprintf(w.f, "applog: %s couldn't be kept as %s (%v): emptied instead\n", Name, OldName, moved)
+		n, _ := fmt.Fprintf(w.f, "applog: %s couldn't be kept as %s (%v): emptied instead\n", filepath.Base(w.path), filepath.Base(w.old), moved)
 		w.size += int64(n)
 	}
 }

@@ -18,6 +18,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/yetone/magpie/internal/agent"
+	"github.com/yetone/magpie/internal/applog"
 	"github.com/yetone/magpie/internal/catalog"
 	"github.com/yetone/magpie/internal/library"
 	"github.com/yetone/magpie/internal/profile"
@@ -168,15 +169,23 @@ func Run(ready func()) error {
 	if len(m.agents) == 0 {
 		return fmt.Errorf("%s", tr("no supported agents found on this machine"))
 	}
+	return runSession(m, serveGateway, func() error {
+		_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+		return err
+	})
+}
+
+func runSession(m model, startGateway func(context.Context) func(), run func() error) error {
+	restoreLog := applog.StartTUI()
 	ctx, stop := context.WithCancel(context.Background())
-	wait := serveGateway(ctx)
+	wait := startGateway(ctx)
 	halt := func() { stop(); wait() }
 	serving.Store(&halt)
 	defer serving.Store(nil)
-	_, err := tea.NewProgram(m, tea.WithAltScreen()).Run()
+	err := run()
 	served := gw.here.Load()
-	stop()
-	wait()
+	halt()
+	restoreLog()
 	if served {
 		fmt.Fprintln(os.Stderr, keepGateway(connected(m.agents)))
 	}

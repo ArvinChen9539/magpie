@@ -1307,6 +1307,15 @@ they serve with the signal handler (`stopGatewayOnSignal`:
 sessions saved, before magpie dies of the signal.
 `TestHangupDrainsTheGatewayFirst`.
 
+`magpie tui` redirects the standard logger to `tui.log` in `appdir.Logs`
+before starting its embedded gateway (#7536). The file uses the app log's
+credential scrubbing and rotates to `tui.old.log` at the same size limit.
+If the TUI log cannot be opened, those messages are discarded. The previous
+log writer returns after the gateway drains, before the TUI prints its exit
+notice. See [`tui.Run`](../../internal/tui/tui.go),
+[`applog.StartTUI`](../../internal/applog/applog.go), and
+`TestTUILogStaysOffTerminal`.
+
 `magpie update` in a terminal restarts the app the same way
 (gaubeebangeel on X: an agent the gateway serves ran the update at 4am,
 and the app ran on as the old version until it was quit and reopened,
