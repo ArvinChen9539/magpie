@@ -25,6 +25,7 @@ const COST = { deepseek: { "deepseek-v4": 1 }, siliconflow: { "deepseek-v4": 0.2
 const NAMES = { deepseek: "DeepSeek", siliconflow: "SiliconFlow", openai: "OpenAI" };
 const share = (id, name, cost, icon) => ({ id, name, icon, calls: 2, errors: 0, input: cost * 1e5, output: cost * 5e4, cache_read: 0, cache_write: 0, cost });
 const sum = (xs) => xs.reduce((a, b) => a + b, 0);
+const activity = (calls) => ({ tps: calls ? 40 : 0, up_bytes: calls * 2000, down_bytes: calls * 1000 });
 
 function ledger(q) {
   const only = q.get("provider");
@@ -38,12 +39,12 @@ function ledger(q) {
   const by = { provider: {}, model: {}, modelAt: {} };
   for (const [id, ms] of who) {
     by.provider[id] = { calls: 2, tokens: 1000, cost: sum(Object.values(ms)) };
-    for (const [m, c] of Object.entries(ms)) by.modelAt[id + "/" + m] = { calls: 1, tokens: 500, cost: c };
+    for (const [m, c] of Object.entries(ms)) by.modelAt[id + "/" + m] = { calls: 1, tokens: 500, cost: c, ...activity(1) };
   }
   for (const [m, c] of Object.entries(models)) by.model[m] = { calls: 1, tokens: 500, cost: c };
   const series = Array.from({ length: 24 }, (_, i) => {
     const on = i === 10;
-    return { label: String(i), time: new Date(midnight.getTime() + i * 3600e3).toISOString(), calls: on ? 6 : 0, errors: 0, input: on ? 1000 : 0, output: on ? 500 : 0, cache_read: 0, cache_write: 0, cost: on ? total : 0, by: on ? by : { provider: {}, model: {}, modelAt: {} } };
+    return { label: String(i), time: new Date(midnight.getTime() + i * 3600e3).toISOString(), calls: on ? 6 : 0, errors: 0, input: on ? 1000 : 0, output: on ? 500 : 0, cache_read: 0, cache_write: 0, cost: on ? total : 0, ...activity(on ? 5 : 0), by: on ? by : { provider: {}, model: {}, modelAt: {} } };
   });
   return {
     period: q.get("period") || "today", rows: [], offset: 0, total: 1, calls: 6, errors: 0, input: total * 1e5, output: total * 5e4, cache_read: 0, cache_write: 0, reasoning: 0, cost: total, unpriced: 0,
@@ -169,9 +170,7 @@ for (const engine of BROWSERS) {
         await p.addInitScript(() => { try { localStorage.setItem("magpie.ledMetric", "cost"); } catch {} });
         // totals in yuan this time: OpenAI's stays in dollars
         await p.route("**/*", serve(lang, asked, "cny"));
-        await p.goto("http://magpie.test/");
-        await p.locator('[data-view="usage"]').first().click();
-        await p.locator(":is(#usageTab .opt, .nav-s):visible").nth(1).click();
+        await p.goto("http://magpie.test/?view=usage&tab=requests");
         await p.locator("#ledRank button.rk").first().waitFor();
         await p.waitForTimeout(200);
         const box = "#ledRank";
@@ -190,6 +189,18 @@ for (const engine of BROWSERS) {
         const at = await rankOf(p, box);
         assert.equal(at["kimi-k3 · OpenAI"], "$0.500");
         assert.equal(at["kimi-k3 · SiliconFlow"], "¥1.80");
+        await tipOf(p, "#ledChart");
+        const tooltip = p.locator("#ledChart .tip");
+        const costs = await tooltip.locator("div:not(.sum) em").allTextContents();
+        assert.deepEqual(costs.sort(), ["$0.500", "$1.50", "¥1.80", "¥1.80", "¥7.20"]);
+        assert.match(await tooltip.locator(".sum em").textContent(), /^¥25\.20/);
+        for (const [metric, value] of [[3, /^40\D/], [4, /^15 KB/]]) {
+          await p.locator("#ledMetric .opt").nth(metric).click();
+          await tipOf(p, "#ledChart");
+          assert.equal(await tooltip.locator("div:not(.sum, .io)").count(), 5);
+          assert.match(await tooltip.locator(".sum em").first().textContent(), value);
+        }
+        await p.locator("#ledMetric .opt").nth(1).click();
 
         // OpenAI picked: the whole page is its calls, in dollars
         await p.locator("#ledSplit .opt").nth(2).click();
@@ -197,6 +208,9 @@ for (const engine of BROWSERS) {
         await p.waitForFunction(() => document.querySelector("#usageCost b")?.textContent === "$2.00");
         assert.equal(asked.at(-1).get("provider"), "openai");
         await p.waitForFunction(() => /^\$/.test(document.querySelector("#ledChart svg text.axis")?.textContent || ""));
+        await p.locator("#ledSplit .opt").nth(1).click();
+        await tipOf(p, "#ledChart");
+        assert.match(await tooltip.locator(".sum em").textContent(), /^\$2\.00/);
         assert.deepEqual(errors, []);
         await ctx.close();
       }
