@@ -189,12 +189,13 @@ func TestProjectPluginCodexTrustFollows(t *testing.T) {
 	}
 	write(t, hooks, got)
 	cfg := filepath.Join(h, ".codex/config.toml")
-	write(t, cfg, "[hooks.state.\""+hooks+":stop:1:0\"]\ntrusted_hash = \"sha256:x\"\n")
+	write(t, cfg, "[hooks.state."+codexKey(hooks+":stop:1:0")+"]\ntrusted_hash = \"sha256:x\"\n")
 	ok(t)(ProjectPlugin(a, "acme-kit", nil))
 	if got := read(t, hooks); !strings.Contains(got, "echo mine") || strings.Contains(got, "echo done") {
 		t.Errorf("hooks.json:\n%s", got)
 	}
-	if got := read(t, cfg); !strings.Contains(got, hooks+":stop:0:0") {
+	if got := read(t, cfg); !strings.Contains(got, "[hooks.state."+codexKey(hooks+":stop:0:0")+"]\ntrusted_hash = \"sha256:x\"") ||
+		strings.Contains(got, "[hooks.state."+codexKey(hooks+":stop:1:0")+"]") {
 		t.Errorf("the user's trust didn't move with their hook:\n%s", got)
 	}
 }
