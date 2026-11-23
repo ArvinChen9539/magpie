@@ -95,8 +95,6 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
         // the app opened again on the server's view now
         const reopen = async () => {
           await page.reload();
-          await page.locator("#prefs").click();
-          await openPart(page, "sync");
           await row.waitFor({ state: "visible" });
         };
         assert.equal(await row.locator(".name").textContent(), w("Data folder"));
