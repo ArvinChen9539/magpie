@@ -2745,7 +2745,7 @@ magpie.plugin("library", (ctx) => {
     const who = el("div", "who");
     who.append(el("div", "name", setName(x)));
     const first = text.split("\n").find((l) => l.trim()) || "";
-    who.append(el("div", "sub", first ? first.replace(/^#+\s*/, "") : t("Empty")));
+    who.append(el("div", "sub", first ? first.replace(/^#+\s*/, "") : t(x.missing ? "Not found on this computer" : "Empty")));
     const tags = el("div", "lib-tags");
     if (x.active) tags.append(tag(t("In use"), "", t("The agents switched on below read this set")));
     if (x.file) tags.append(tag(t("Your file"), "", t("Kept in {path}, not in the library: edits there reach the agents, and Save writes there", { path: tilde(x.file) })));

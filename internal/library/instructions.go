@@ -131,7 +131,11 @@ func (l *Library) isSetFile(p string) bool {
 
 func readText(path string) string {
 	b, _ := os.ReadFile(path)
-	return strings.TrimSpace(strings.ReplaceAll(string(b), "\r\n", "\n"))
+	return normalizedText(b)
+}
+
+func normalizedText(raw []byte) string {
+	return strings.TrimSpace(strings.ReplaceAll(string(raw), "\r\n", "\n"))
 }
 
 func writeText(path, text string) error {
@@ -149,11 +153,15 @@ func writeText(path, text string) error {
 // the agent's own additions after it, and memory's published digest for
 // it last; "" for nothing.
 func (l *Library) wanted(agent string) string {
+	return l.wantedWithShared(agent, setText(l.sharedPath()))
+}
+
+func (l *Library) wantedWithShared(agent, shared string) string {
 	if !slices.Contains(l.Instructions.Agents, agent) {
 		return ""
 	}
 	parts := []string{}
-	for _, s := range []string{setText(l.sharedPath()), readText(extraPath(agent)), l.memoryDigest(agent)} {
+	for _, s := range []string{shared, readText(extraPath(agent)), l.memoryDigest(agent)} {
 		if s != "" {
 			parts = append(parts, s)
 		}
@@ -331,8 +339,8 @@ func unreadable(p string) error {
 // anyone: no agent ticked, or no shared text. To an automatic write that
 // is a library that lost them, as an upgrade's reset leaves one, not a
 // take-back the user asked for, which the page writes itself (#5709).
-func (l *Library) instructionsLost() bool {
-	return len(l.Instructions.Agents) == 0 || setText(l.sharedPath()) == ""
+func (l *Library) instructionsLost(shared string) bool {
+	return len(l.Instructions.Agents) == 0 || shared == ""
 }
 
 // syncInstructions writes the agent's part as the library has it. A part
@@ -364,14 +372,19 @@ func (l *Library) syncInstructions(t *Target, all []*Target, b *backups, res *Re
 		a.Instructions, a.InstrHash = false, ""
 		return
 	}
+	sharedPath := l.sharedPath()
+	sharedBytes, sharedErr := os.ReadFile(sharedPath)
+	shared := own(normalizedText(sharedBytes))
 	if slices.Contains(l.Instructions.Agents, id) {
+		if sharedErr != nil && (!errors.Is(sharedErr, os.ErrNotExist) || l.linked(sharedPath)) {
+			res.fail(id, "instructions", sharedErr)
+			return
+		}
 		// a text that can't be read is unknown, not empty: writing what
 		// is left would take the agent's part out or cut it down (#5709)
-		for _, p := range []string{l.sharedPath(), extraPath(id)} {
-			if err := unreadable(p); err != nil {
-				res.fail(id, "instructions", err)
-				return
-			}
+		if err := unreadable(extraPath(id)); err != nil {
+			res.fail(id, "instructions", err)
+			return
 		}
 		if !l.Instructions.NoMemory {
 			if _, err := memory.Digest(memoryAgent(id)); err != nil {
@@ -380,7 +393,7 @@ func (l *Library) syncInstructions(t *Target, all []*Target, b *backups, res *Re
 			}
 		}
 	}
-	want := l.wanted(id)
+	want := l.wantedWithShared(id, shared)
 	raw, err := instrRead(t)
 	if err != nil {
 		res.fail(id, "instructions", err)
@@ -419,7 +432,7 @@ func (l *Library) syncInstructions(t *Target, all []*Target, b *backups, res *Re
 		a.Instructions, a.InstrHash = want != "", hash(want)
 		return
 	}
-	if auto && want == "" && ok && l.instructionsLost() {
+	if auto && want == "" && ok && l.instructionsLost(shared) {
 		// An apply with nothing to give takes no part out (#5709): the
 		// library's text itself gone, or no agent ticked, reads empty to
 		// every agent at once, as an upgrade that lost them does (the
@@ -518,11 +531,12 @@ type InstructionsView struct {
 
 // SetView is one set of shared instructions as the page shows it.
 type SetView struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	Text   string `json:"text"`
-	Active bool   `json:"active,omitempty"`
-	File   string `json:"file,omitempty"` // the user's own file it is kept in
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Text    string `json:"text"`
+	Active  bool   `json:"active,omitempty"`
+	File    string `json:"file,omitempty"` // the user's own file it is kept in
+	Missing bool   `json:"missing,omitempty"`
 }
 
 // ReadInstructions is the shared text and each agent's file.
@@ -543,7 +557,8 @@ func ReadInstructions() (*InstructionsView, error) {
 func (l *Library) instructionsView(targets []*Target, asleep []*agent.Agent) *InstructionsView {
 	v := &InstructionsView{Shared: setText(l.sharedPath()), Agents: []AgentInstructions{}}
 	for _, s := range l.sets() {
-		v.Sets = append(v.Sets, SetView{ID: s.ID, Name: s.Name, Text: setText(l.textPath(s.ID)), Active: s.ID == l.active(), File: s.File})
+		raw, err := os.ReadFile(l.textPath(s.ID))
+		v.Sets = append(v.Sets, SetView{ID: s.ID, Name: s.Name, Text: own(normalizedText(raw)), Active: s.ID == l.active(), File: s.File, Missing: s.File != "" && errors.Is(err, os.ErrNotExist)})
 	}
 	for _, t := range targets {
 		if t.Instructions == "" {
@@ -876,7 +891,7 @@ func SyncLinked() (*Result, error) {
 	changed := file != "" && linkSeen.file == file && (!linkSeen.mod.Equal(mod) || linkSeen.size != size)
 	linkSeen.file, linkSeen.mod, linkSeen.size = file, mod, size
 	linkSeen.Unlock()
-	if !changed {
+	if !changed || size == -1 {
 		return nil, nil
 	}
 	return changeInstructions(func(*Library) error { return nil })

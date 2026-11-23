@@ -87,8 +87,63 @@ func TestLinkedSet(t *testing.T) {
 	}
 }
 
-// A set can't be kept in a file magpie writes into, or in the library's
-// own, or in a file another set has.
+func TestMissingLinkedSetKeepsPublishedInstructions(t *testing.T) {
+	home := sandbox(t)
+	shared := filepath.Join(home, "shared.md")
+	codex := filepath.Join(home, ".codex", "AGENTS.md")
+	claude := filepath.Join(home, ".claude", "CLAUDE.md")
+	write(t, shared, "Shared rules.\n")
+	write(t, claude, "Claude's own rules.\n")
+	ok(t)(SaveInstructions(InstructionsChange{
+		Create: &InstrSet{ID: "shared", Name: "Shared", File: shared},
+		Agents: []string{"codex", "claude"},
+	}))
+	if _, err := SyncLinked(); err != nil {
+		t.Fatal(err)
+	}
+	published := map[string]string{codex: read(t, codex), claude: read(t, claude)}
+	for file, text := range published {
+		if !strings.Contains(text, "Shared rules.") {
+			t.Fatalf("%s was not given the shared rules: %q", file, text)
+		}
+	}
+	if err := os.Rename(shared, shared+".saved"); err != nil {
+		t.Fatal(err)
+	}
+	view, err := ReadInstructions()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.Sets) != 2 || !view.Sets[1].Active || !view.Sets[1].Missing {
+		t.Errorf("missing active set not reported: %+v", view.Sets)
+	}
+	for range 2 {
+		if _, err := SyncLinked(); err != nil {
+			t.Fatal(err)
+		}
+		for file, text := range published {
+			if got, err := os.ReadFile(file); err != nil || string(got) != text {
+				t.Errorf("%s changed while the source was unavailable: %q (%v)", file, got, err)
+			}
+		}
+	}
+	if t.Failed() {
+		return
+	}
+	write(t, shared, "Restored rules with a different length.\n")
+	ok(t)(SyncLinked())
+	for file := range published {
+		if text := read(t, file); !strings.Contains(text, "Restored rules") {
+			t.Errorf("%s did not get the restored rules: %q", file, text)
+		}
+	}
+	empty := ""
+	ok(t)(SaveInstructions(InstructionsChange{Shared: &empty}))
+	if text := read(t, claude); strings.Contains(text, "Restored rules") || !strings.Contains(text, "Claude's own rules.") {
+		t.Errorf("explicit clearing left %q", text)
+	}
+}
+
 func TestLinkRefused(t *testing.T) {
 	h := sandbox(t)
 	write(t, filepath.Join(h, ".agents/AGENTS.md"), "Mine.\n")

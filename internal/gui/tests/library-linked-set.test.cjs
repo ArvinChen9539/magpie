@@ -23,7 +23,11 @@ const library = () => ({
   ],
   instructions: {
     shared: "Mine.",
-    sets: [{ id: "default", name: "", active: true, text: "Mine." }, { id: "agents", name: "Everyone", active: false, text: "# Shared\nRules.", file: FILE }],
+    sets: [
+      { id: "default", name: "", active: true, text: "Mine." },
+      { id: "agents", name: "Everyone", active: false, text: "# Shared\nRules.", file: FILE },
+      { id: "missing", name: "Missing source", text: "", file: `${HOME}/missing.md`, missing: true },
+    ],
     agents: [
       { agent: "claude", name: "Claude Code", icon: "", path: `${HOME}/.claude/CLAUDE.md`, on: true, extra: "" },
       { agent: "droid", name: "Droid", icon: "", path: `${HOME}/.factory/AGENTS.md`, on: true, extra: "" },
@@ -63,6 +67,7 @@ const KEYS = [
   "Remove {name} — the file stays",
   "Keep in a file…",
   "Full path of a Markdown file",
+  "Not found on this computer",
 ];
 
 const view = "#view-library";
@@ -106,6 +111,8 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
           const missing = await page.evaluate(([keys, lang]) => lang === "en" ? [] : keys.filter((k) => !I18N[lang]?.[k]), [KEYS, lang]);
           assert.deepEqual(missing, [], `every string has its ${lang}`);
           const tr = (k, vars) => page.evaluate(([k, vars]) => t(k, vars), [k, vars]);
+          const missingSet = page.locator(`${view} .lib-set`).filter({ hasText: "Missing source" });
+          assert.equal(await missingSet.locator(".who .sub").textContent(), await tr("Not found on this computer"));
 
           // the linked set is tagged, and opened says where it is kept
           const row = page.locator(`${view} .lib-set`).nth(1);
