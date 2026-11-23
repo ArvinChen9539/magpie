@@ -21,7 +21,10 @@ const assets = path.resolve(__dirname, "../assets");
 const vllm = {
   id: "vllm", name: "LAN vLLM", icon: "generic", chat: "https://192.168.1.20:8443/v1", responses: "", anthropic: "", catalog: "",
   models: [{ id: "qwen3-32b", name: "qwen3-32b", on: true }], agents: [], fallback: [], headers: {},
-  key: { set: false, masked: "" }, keyList: [], balanceToken: { takes: false, set: false }, proxy: "", searches: false,
+  key: { set: true, masked: "sk-…one" }, keyList: [
+    { id: "aaaaaaaaaa", name: "One", masked: "sk-…one", on: true },
+    { id: "bbbbbbbbbb", name: "Two", masked: "sk-…two", on: true },
+  ], balanceToken: { takes: false, set: false }, proxy: "", searches: false,
   takesInsecureTLS: true, insecureTLS: false,
 };
 const models = [
@@ -179,6 +182,45 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
       }
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, "the page scrolls sideways");
       assert.deepEqual(errors, []);
+    });
+
+    test(`${engine} ${lang} ${width}: routing options explain themselves without being selected`, async (t) => {
+      const { page } = await open(t, "groups");
+      const edit = await page.evaluate(() => window.t("Edit"));
+      await page.locator(".rt-group").getByRole("button", { name: edit, exact: true }).click();
+      const advanced = page.locator(".rt-gedit .rt-gadv");
+      if (!(await advanced.evaluate((item) => item.open))) await advanced.locator("summary").click();
+      const card = page.locator(".set-hint.on");
+      const cases = [
+        ["rotate", "In turn: each message you send goes to the next member's account or key, round the list; the agent's tool calls for it stay on the same one. A move costs some prompt cache; with Stays on Session, a whole conversation stays on one instead."],
+        ["session", "A conversation stays with the account or key that answered it for the whole session, while it can answer."],
+      ];
+      for (const [id, message] of cases) {
+        const option = advanced.locator(`button[data-seg="${id}"]`);
+        await page.mouse.move(1, 1);
+        await option.evaluate((button) => button.scrollIntoView({ block: "center", behavior: "instant" }));
+        await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+        if (id === "session") {
+          await page.keyboard.press("Tab");
+          await option.focus();
+        } else if (width === 1100) {
+          await option.hover();
+        } else {
+          await option.dispatchEvent("pointerover", { pointerType: "mouse" });
+        }
+        assert.equal(await option.getAttribute("aria-description"), await page.evaluate((text) => window.t(text), message));
+        await card.waitFor();
+        assert.equal(await card.textContent(), await page.evaluate((text) => window.t(text), message));
+        assert.equal(await option.getAttribute("aria-pressed"), "false");
+      }
+      await page.evaluate(() => window.show("providers"));
+      await page.locator(".row.provider", { hasText: "LAN vLLM" }).click();
+      const providerAdvanced = page.locator(".editor.roomy details.more.advanced");
+      if (!(await providerAdvanced.evaluate((item) => item.open))) await providerAdvanced.locator(":scope > summary").click();
+      const providerOption = providerAdvanced.locator('button[data-seg="rotate"]');
+      const expected = await page.evaluate(() => t(ROUTINGS.find(([id]) => id === "rotate")[2]));
+      assert.equal(await providerOption.getAttribute("aria-description"), expected);
+      assert.equal(await providerOption.getAttribute("aria-pressed"), "false");
     });
   }
 }

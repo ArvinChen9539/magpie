@@ -50,6 +50,17 @@ magpie.plugin("routing", (ctx) => {
 
 // The page, drawn once app.js is set up; part is its part, given the hooks
 // app.js calls
+const ROTATION = new Set(["order", "drain", "rotate", "usage", "pace", "weight", "free", "fast", "cheap", "expiring", "fit"]);
+
+function routingSegs(items, current, onPick, hintOf) {
+  const box = segs(items, current, onPick, hintOf);
+  [...box.querySelectorAll(".opt")].forEach((button, index) => {
+    if (ROTATION.has(items[index][0])) button.dataset.feature = "rotation";
+    else if (items[index][3]) button.dataset.feature = "middleware";
+  });
+  return box;
+}
+
 function routingPage(part) {
   const box = $("#rt");
   if (!box) return;
@@ -8449,7 +8460,7 @@ function routingPage(part) {
     const drawFig = () => drawRotFig(rFig, d.routing === "rotate", d.affinity || "");
     drawFig();
     const rw = el("div");
-    rw.append(routingSegs(withJS(GROUP_ROUTE_OPTS, d.routing).map(([id, n, js]) => [id, t(n), , js]), d.routing, (v) => { d.routing = v; rHint.textContent = gHint(v); drawFig(); draw(); drawRules(); drawSink(); }), rHint, rFig);
+    rw.append(routingSegs(withJS(GROUP_ROUTE_OPTS, d.routing).map(([id, n, js]) => [id, t(n), , js]), d.routing, (v) => { d.routing = v; rHint.textContent = gHint(v); drawFig(); draw(); drawRules(); drawSink(); }, gHint), rHint, rFig);
     rw.append(el("div", "hint", t(GROUP_NEST)));
     advIn.append(el("label", "", t("Routing")), rw);
     // one rate limited with quota left: its place, or the back
@@ -8588,9 +8599,10 @@ function routingPage(part) {
     };
     cmpW.append(cmpIn, cmpHint);
     advIn.append(el("label", "", t("Compact at")), cmpW);
-    const aHint = el("div", "hint", t(AFF_HINT[d.affinity] || AFF_HINT[""]));
+    const staysHint = (id) => t(AFF_HINT[id] || AFF_HINT[""]);
+    const aHint = el("div", "hint", staysHint(d.affinity));
     const aw = el("div");
-    aw.append(segs(AFF_OPTS.map(([id, n]) => [id, t(n)]), d.affinity, (v) => { d.affinity = v; aHint.textContent = t(AFF_HINT[v] || AFF_HINT[""]); drawFig(); }), aHint);
+    aw.append(segs(AFF_OPTS.map(([id, n]) => [id, t(n)]), d.affinity, (v) => { d.affinity = v; aHint.textContent = staysHint(v); drawFig(); }, staysHint), aHint);
     advIn.append(el("label", "", t("Stays")), aw);
     // which gateway keys may use it, and masking: set by few, so under
     // Advanced with the rest (the owner, 11-12)

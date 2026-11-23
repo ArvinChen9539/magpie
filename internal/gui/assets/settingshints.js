@@ -9,6 +9,7 @@
 // It goes when the pointer or focus leaves the row, the page scrolls, a key
 // is pressed or the row is drawn again. Imported by app.js at start.
 const ROWS = "#view-settings .row.pref, .editor.roomy .row.pref, .editor.roomy .fld, .hint-row";
+const OPTIONS = ".segs > .opt[aria-description]";
 const LINES = ":scope > .who > .sub, :scope > .hint, :scope > .txt > .expl";
 const card = el("div", "set-hint");
 card.setAttribute("aria-hidden", "true"); // a screen reader reads the lines in the row
@@ -29,7 +30,8 @@ for (const root of [document.getElementById("view-settings"), document.getElemen
 }
 
 const hints = (r) => [...r.querySelectorAll(LINES)]
-  .filter((s) => !s.hidden && getComputedStyle(s).getPropertyValue("--hint").trim() === "1" && s.textContent.trim());
+  .filter((s) => !s.hidden && getComputedStyle(s).getPropertyValue("--hint").trim() === "1" && s.textContent.trim())
+  .map((s) => s.textContent.trim());
 
 function hide() {
   clearTimeout(wait);
@@ -38,9 +40,10 @@ function hide() {
   card.hidden = true;
 }
 function show(r, ptr) {
-  const subs = r.isConnected && !r.closest("[hidden]") ? hints(r) : [];
+  const subs = r.isConnected && !r.closest("[hidden]")
+    ? (r.matches(OPTIONS) ? [r.getAttribute("aria-description")] : hints(r)) : [];
   if (!subs.length) return hide();
-  card.replaceChildren(...subs.map((s) => el("p", "", s.textContent.trim())));
+  card.replaceChildren(...subs.map((text) => el("p", "", text)));
   card.hidden = false;
   // a .who the editor lays out as display: contents has no box of its own: its name's stands for it
   const lead = r.querySelector(":scope > .who, :scope > .txt") || r;
@@ -70,6 +73,8 @@ function point(r, now) {
 // grid, is the field's too
 function rowOf(n) {
   if (!(n instanceof Element)) return null;
+  const option = n.closest(OPTIONS);
+  if (option) return option;
   const l = n.closest(".editor.roomy label");
   if (l?.nextElementSibling?.matches(".fld")) return l.nextElementSibling;
   return n.closest(ROWS);
@@ -97,6 +102,6 @@ hide();
 import("./updatetrust.js").catch(() => {});
 // the pointer already on a row, or focus, as the import came
 {
-  const on = [...document.querySelectorAll(ROWS)].findLast?.((r) => r.matches(":hover")) || rowOf(document.activeElement);
+  const on = document.querySelector(OPTIONS + ":hover") || [...document.querySelectorAll(ROWS)].findLast?.((r) => r.matches(":hover")) || rowOf(document.activeElement);
   if (on) point(on);
 }

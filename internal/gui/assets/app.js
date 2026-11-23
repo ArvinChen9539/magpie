@@ -6920,7 +6920,7 @@ const decideEntry = (m) => !m.group && !!m.provider?.id && decidesModel(m.provid
 
 let segsMade = 0;
 const segsOO = (on, fn) => segs([["off", t("Off")], ["on", t("On")]], on ? "on" : "off", (v) => fn(v === "on"));
-function segs(items, current, onPick) {
+function segs(items, current, onPick, hintOf) {
   const box = el("div", "segs");
   const kind = items.map(([id]) => id).join("|");
   box.dataset.kind = kind;
@@ -6931,6 +6931,8 @@ function segs(items, current, onPick) {
     b.type = "button";
     b.dataset.seg = id;
     b.setAttribute("aria-pressed", String(id === current));
+    const hint = hintOf?.(id);
+    if (hint) b.setAttribute("aria-description", hint);
     b.onclick = () => {
       for (const x of box.querySelectorAll(".opt")) {
         x.classList.toggle("on", x === b);
@@ -12512,10 +12514,6 @@ const ROUTINGS = [
 // drawRotFig shows In turn's figure (rotfig.js, imported when first
 // drawn) in box while on, as Stays has it; off, the box is hidden and empty
 const drawRotFig = (b, on, a) => (b.hidden = !on) ? b.replaceChildren() : (drawRotFig.p ||= import("./rotfig.js")).then(() => b.hidden || b.replaceChildren(rotateFigure(a)));
-// the routings besides Smart are the built-in plugin rotation's
-// (plugins/rotation): off, their options leave the page (data-feature),
-// and Smart is left — one in use keeps it on
-const ROTATION = new Set(["order", "drain", "rotate", "usage", "pace", "weight", "free", "fast", "cheap", "expiring", "fit"]);
 // jsRoutings: the routings JS gateway plugins serve now ("<plugin>/<name>",
 // settings' jsRoutings, plugins/middleware's), and saved, a routing none
 // serves now, shown as it is: its pool is tried in its listed order
@@ -12525,16 +12523,6 @@ function jsRoutings(saved) {
   if (saved && !ROUTINGS.some(([id]) => id === saved) && !out.some(([id]) => id === saved))
     out.push([saved, saved, t("No plugin serves this routing now, so requests go to the accounts or keys in their listed order. Turn on the gateway plugin that serves it on the Plugins page.")]);
   return out;
-}
-// routingSegs: segs of routings, theirs marked as the plugin's: the
-// built-in rotation's, and the JS gateway plugins' (plugins/middleware)
-function routingSegs(items, current, onPick) {
-  const box = segs(items, current, onPick);
-  [...box.querySelectorAll(".opt")].forEach((b, i) => {
-    if (ROTATION.has(items[i][0])) b.dataset.feature = "rotation";
-    else if (items[i][3]) b.dataset.feature = "middleware";
-  });
-  return box;
 }
 const routingsOf = (p) => [...ROUTINGS, ...jsRoutings(p.routing || "")];
 // as on the Routing page's list of these (routing/client.js AFF_OPTS)
@@ -12604,11 +12592,14 @@ function renderRouting(p) {
     return u;
   };
   const rHint = el("div", "hint expl"), rUnsaved = unsaved();
+  const routeHint = (id) => {
+    const option = routingsOf(p).find(([value]) => value === id) || ROUTINGS[0];
+    return (ROUTINGS.includes(option) ? t(option[2]) : option[2]) + own(option[0]);
+  };
   // In turn drawn under its words, as Stays has it
   const rFig = el("div", "rot-wrap"), drawFig = () => drawRotFig(rFig, routingNow() === "rotate", affinityNow());
   const drawRouting = () => {
-    const cur = routingsOf(p).find(([id]) => id === routingNow()) || ROUTINGS[0];
-    rHint.textContent = (ROUTINGS.includes(cur) ? t(cur[2]) : cur[2]) + own(cur[0]);
+    rHint.textContent = routeHint(routingNow());
     drawFig();
     rUnsaved.hidden = routingNow() === (p.routing || "");
     // in turn and by weight go round already
@@ -12616,7 +12607,7 @@ function renderRouting(p) {
     // each key's or account's weight shows beside it while by weight
     for (const l of document.querySelectorAll(".accts")) if (l.dataset.provider === p.id) l.classList.toggle("weighted", routingNow() === "weight"), l.onrouting?.();
   };
-  const rPick = routingSegs(routingsOf(p).map(([id, name, , js]) => [id, ROUTINGS.some((r) => r[0] === id) ? t(name) : name, , js]), routingNow(), (routing) => { draft.routing = routing; drawRouting(); });
+  const rPick = routingSegs(routingsOf(p).map(([id, name, , js]) => [id, ROUTINGS.some((r) => r[0] === id) ? t(name) : name, , js]), routingNow(), (routing) => { draft.routing = routing; drawRouting(); }, routeHint);
   const rRow = el("div", "route-pick");
   rRow.append(rPick, rUnsaved);
   const rWrap = el("div", "fld");
@@ -12633,13 +12624,13 @@ function renderRouting(p) {
   const kWrap = el("div", "sink-wrap fld"), kLabel = el("label", "", t("Rate limited"));
   kWrap.append(kRow, kHint);
   const sHint = el("div", "hint expl"), sUnsaved = unsaved();
+  const staysHint = (id) => t((STAYS.find(([value]) => value === id) || STAYS[0])[2]);
   const drawStays = () => {
-    const cur = STAYS.find(([id]) => id === affinityNow()) || STAYS[0];
-    sHint.textContent = t(cur[2]);
+    sHint.textContent = staysHint(affinityNow());
     sUnsaved.hidden = affinityNow() === (p.affinity || "");
     drawFig();
   };
-  const sPick = segs(STAYS.map(([id, name]) => [id, t(name)]), affinityNow(), (affinity) => { draft.affinity = affinity; drawStays(); });
+  const sPick = segs(STAYS.map(([id, name]) => [id, t(name)]), affinityNow(), (affinity) => { draft.affinity = affinity; drawStays(); }, staysHint);
   const sRow = el("div", "route-pick");
   sRow.append(sPick, sUnsaved);
   const sWrap = el("div", "fld");

@@ -42,6 +42,12 @@ three.
 
 ## Constraints and failure behavior
 
+Hovering over or moving keyboard focus to a Routing or Stays option in
+the provider or group editor shows that option's own translated
+description in the shared [`settingshints.js`](../../internal/gui/assets/settingshints.js)
+card. The button also exposes it as its accessible description.
+`editor-hints.test.cjs` covers the option hints without changing a selection.
+
 ### First opening of an agent's Details
 
 In the main window, `expandLink` in
