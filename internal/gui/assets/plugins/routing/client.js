@@ -2635,14 +2635,12 @@ function routingPage(part) {
   const tried = (r, tr) => r.order.find((x) => seat(x) === seat(tr))
     || r.order.find((x) => x.id === tr.id && (x.model || "") === (tr.model || ""))
     || r.order.find((x) => x.id === tr.id);
-  // tryseat is the seat of the row a try went to: its row is keyed by it
-  const tryseat = (r, tr) => seat(tried(r, tr) || tr);
   // made once for each route's list, which a trace update replaces whole
   const setsOf = new WeakMap();
   const setOf = (r) => {
     let s = setsOf.get(r.order);
     if (s === undefined) setsOf.set(r.order, s = r.order.map(seat).sort().join("\n"));
-    return s;
+    return stageScope(r) + s;
   };
   // whole fills in the lists a route's JSON can leave null: a route the
   // gateway weighed no seats for has "order": null, and the page reads
@@ -2657,6 +2655,9 @@ function routingPage(part) {
   // routing group, or the provider its model is of. A key of its own, no
   // ">" in it, as a group in the group's way down is joined by them.
   const wayOf = (r) => "\u0002" + (r.group ? "g:" + r.group.id : "p:" + r.provider).replace(/>/g, "\u0003");
+  const stageScope = (r) => r.group ? wayOf(r) + "\u0000" : "";
+  const stageSeat = (scope, source) => scope + seat(source);
+  const tryseat = (r, tr) => stageSeat(stageScope(r), tried(r, tr) || tr);
   let ways = null; // with more than one route on the stage, each one's heading: way → info
   // wayInfos tells of each route on the stage as its latest request found
   // it, and of the agents sending to it, by name
@@ -2975,9 +2976,20 @@ function routingPage(part) {
     ways = byWay.size > 1 ? wayInfos(rs) : null;
     const wayAt = new Map();
     for (const [w, ks] of byWay) for (const k of ks) {
-      for (const x of seated(latest.get(k))) { const id = seat(x); if (!has.has(id)) { has.add(id); ids.push(id); wayAt.set(id, w); } }
+      const r = latest.get(k), scope = stageScope(r);
+      for (const source of seated(r)) {
+        const id = stageSeat(scope, source);
+        if (!has.has(id)) { has.add(id); ids.push(id); wayAt.set(id, w); }
+      }
     }
-    for (const r of rs) for (const w of [...r.order, ...(r.left || [])]) { wOf.set(seat(w), w); rOf.set(seat(w), r.id); }
+    for (const r of rs) {
+      const scope = stageScope(r);
+      for (const source of [...r.order, ...(r.left || [])]) {
+        const id = stageSeat(scope, source);
+        wOf.set(id, source);
+        rOf.set(id, r.id);
+      }
+    }
     // where each was, of those on the stage: a key folded away was nowhere
     const before = new Map([...[...rows].map(([id, row]) => [id, row.li]), ...[...folds].map(([k, f]) => ["\u0001" + k, f.li])]
       .filter(([, li]) => li.isConnected).map(([id, li]) => [id, li.getBoundingClientRect().top]));
@@ -3280,7 +3292,7 @@ function routingPage(part) {
       // rest with it (#1960)
       const r = src().get(row.rid) || pinned || cur, { answered, rests, gave, went } = findings(r);
       const w = row.w, rest = rests.get(w.id) || rests.get(w.id + "\u0000" + (w.model || "")), resting = rest && at(rest.until) > n;
-      const smart = r.order[0] && id === seat(r.order[0]) && smartFor(r), said = smart ? t("picked for “{intent}”", { intent: smart }) : "";
+      const smart = r.order[0] && id === stageSeat(stageScope(r), r.order[0]) && smartFor(r), said = smart ? t("picked for “{intent}”", { intent: smart }) : "";
       // the session it answers or answered, by its title, so which one
       // has the account shows (connor_yang on Discord): the request's
       // own, not each request's words

@@ -262,6 +262,12 @@ with one on names no routing, and the mode paragraph says how to get one
 (`LONE`). The header is drawn again when the groups come in (`headOf`).
 See `routing-mode-goes.test.cjs`.
 
+When several routes share the stage, each routing group has its own row
+for a key or account, even if two groups have identical candidate lists.
+A request's packet and status follow its group's row (`stageSeat`,
+`tryseat`). Requests in the same group reuse its rows, and direct provider
+requests share their own rows. See `routing-shared-source.test.cjs`.
+
 ### Routing key and account folds
 
 Three or more API keys, or three or more accounts, of one provider standing
