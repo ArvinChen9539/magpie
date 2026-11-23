@@ -21353,7 +21353,7 @@ function renderAlerts(s, keep) {
     box.textContent = what;
     box.title = what;
     // the problem said whole, the line let wrap for it
-    box.classList.toggle("wraps", !!problem);
+    box.classList.toggle("warns", !!problem);
     if (problem) box.append(" · ", el("span", "warn", problem));
   };
   sub("#usageAlertSub", t("A notification when a 5-hour, weekly or monthly window reaches this share used, once each time it runs"));
