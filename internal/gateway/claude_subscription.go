@@ -6024,6 +6024,7 @@ const (
 	runExpired     = "process expired"
 	noRunWaiting   = "no run waiting"
 	accountChanged = "account changed"
+	partialResults = "do not cover all calls of the interactive reply"
 	// another request has the run's calls answered, or is answering them
 	answeredElsewhere = "answered by another request"
 )
@@ -6103,6 +6104,9 @@ func (b *subscriptionBridge) match(req *Request) (*subscriptionRun, []Part, stri
 		}
 		b.mu.Unlock()
 		if found != nil {
+			if !found.hasAllShownResults(fresh) {
+				return nil, nil, partialResults
+			}
 			return found, fresh, byExactID
 		}
 		if before == nil {
@@ -6112,12 +6116,33 @@ func (b *subscriptionBridge) match(req *Request) (*subscriptionRun, []Part, stri
 		}
 		run, named, w := b.remap(req.Model, calls, fresh, before)
 		if run != nil {
+			if !run.hasAllShownResults(named) {
+				return nil, nil, partialResults
+			}
 			return run, named, byRemap
 		}
 		why = w
 		time.Sleep(25 * time.Millisecond)
 	}
 	return nil, nil, why
+}
+
+func (r *subscriptionRun) hasAllShownResults(results []Part) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.tui || len(r.shown) < 2 {
+		return true
+	}
+	answered := make(map[string]bool, len(results))
+	for _, result := range results {
+		answered[result.CallID] = true
+	}
+	for _, call := range r.shown {
+		if !answered[call.id] {
+			return false
+		}
+	}
+	return true
 }
 
 // remap finds the run a client's results are for when the client named the
@@ -7762,7 +7787,7 @@ func (s *Server) serveSubscriptionAs(w http.ResponseWriter, r *http.Request, fro
 		}
 		log.Printf("%s on %s: tool results %s", name, model, how)
 	}
-	if run == nil && name == "Claude Code" {
+	if run == nil && name == "Claude Code" && how != partialResults {
 		var why string
 		if req.branch, why = s.subscription.branch(req, owner); req.branch == nil && why != "" {
 			// what the match was, never what was said
@@ -7794,7 +7819,7 @@ func (s *Server) serveSubscriptionAs(w http.ResponseWriter, r *http.Request, fro
 			// a run resumed is told this request's too
 			req.runTold(run)
 			run.adviseOn(r.Context(), req, s.adviceRound)
-			if name == "Claude Code" {
+			if name == "Claude Code" && how != partialResults {
 				s.subscription.supersede(req, run)
 			}
 		}

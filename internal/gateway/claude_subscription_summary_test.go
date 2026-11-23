@@ -8,6 +8,50 @@ import (
 	"time"
 )
 
+func TestClaudeSummaryWithPartialToolResults(t *testing.T) {
+	bridge := newSubscriptionBridge()
+	run := &subscriptionRun{tui: true, parkedAt: time.Now(), shown: []shownCall{{id: "toolu_first", name: "Read"}, {id: "toolu_second", name: "Read"}}}
+	bridge.runs["lead"] = run
+	bridge.calls["toolu_first"] = run
+	request := func(complete bool) *Request {
+		calls := []Part{{Kind: ToolCall, ID: "toolu_first", Name: "Read"}}
+		results := []Part{{Kind: ToolResult, CallID: "toolu_first", Text: "first result"}}
+		if complete {
+			calls = append(calls, Part{Kind: ToolCall, ID: "toolu_second", Name: "Read"})
+			results = append(results, Part{Kind: ToolResult, CallID: "toolu_second", Text: "second result"})
+		} else {
+			results = append(results, Part{Kind: Text, Text: "Describe your most recent action in 3-5 words."})
+		}
+		return &Request{Messages: []Message{
+			{Role: "user", Parts: []Part{{Kind: Text, Text: "Read the files"}}},
+			{Role: "assistant", Parts: calls},
+			{Role: "user", Parts: results},
+		}}
+	}
+	if matched, _, _ := bridge.match(request(false)); matched != nil {
+		t.Error("partial AgentSummary matched the interactive run still waiting on another call")
+	}
+	matched, results, _ := bridge.match(request(true))
+	if matched != run || len(results) != 2 {
+		t.Fatalf("complete continuation matched %p with %d results, want %p with both results", matched, len(results), run)
+	}
+	remapped := request(true)
+	run.told = historyKey(remapped.Messages[:1])
+	remapped.Messages[1].Parts[0].ID = "TU_first"
+	remapped.Messages[1].Parts[1].ID = "TU_second"
+	remapped.Messages[2].Parts[0].CallID = "TU_first"
+	remapped.Messages[2].Parts[1].CallID = "TU_second"
+	partial := remapped.Messages[2].Parts[:1]
+	matched, results, _ = bridge.match(remapped)
+	if matched != run || len(results) != 2 || results[1].CallID != "toolu_second" {
+		t.Fatalf("complete continuation with remapped IDs matched %p with %+v, want %p with both run IDs", matched, results, run)
+	}
+	remapped.Messages[2].Parts = partial
+	if matched, _, _ := bridge.match(remapped); matched != nil {
+		t.Error("partial continuation with remapped IDs matched the interactive run")
+	}
+}
+
 // recih on X (#6128): Claude Code's AgentSummary sends the sub-agent's
 // conversation whole, without the assistant messages whose calls have no
 // result yet, and keeps the words before them. The last reply then has no

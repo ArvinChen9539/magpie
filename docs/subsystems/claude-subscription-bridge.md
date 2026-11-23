@@ -1064,6 +1064,15 @@ Claude Code (90K to 160K cache tokens written for a label). When no branch is
 found the log says why, by structure only: `no branch of a run's session for
 this request: <reason>`.
 
+An AgentSummary can also include results for some of an interactive reply's
+parallel calls (#7397). A matching call ID can identify the waiting run, but
+the handoff requires a result for every call that reply showed to the client,
+including calls whose callbacks are still being registered. An incomplete
+request gets its own run from its transcript. Copying the waiting reply's
+session could bring along unanswered calls that the client omitted. The
+waiting run stays available for the complete continuation.
+`TestClaudeSummaryWithPartialToolResults`.
+
 A new run (and one started from a transcript, `replaySession`) picks its
 lifetime with `runTTLFor`:
 
