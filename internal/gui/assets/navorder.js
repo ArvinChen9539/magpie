@@ -29,3 +29,8 @@ window.navArrange = function () {
   }
   for (const e of home) if (!e.dataset.view) own ? e.remove() : e.dataset.en && (e.textContent = t(e.dataset.en));
 };
+
+if (navList("Order").length) {
+  navHides();
+  if (!sideNav()) thumbRefit(nav);
+}

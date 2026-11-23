@@ -123,6 +123,32 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
       await arranged(page, want);
       assert.deepEqual(await groups(page), []);
 
+      const top = await open(browser, { lang });
+      await top.addInitScript((savedOrder) => {
+        localStorage.setItem("magpie.navOrder", JSON.stringify(savedOrder));
+        localStorage.setItem("magpie.navLayout", "top");
+      }, want);
+      const { promise: heldOrder, resolve: releaseOrder } = Promise.withResolvers();
+      await top.route("**/navorder.js", async (route) => { await heldOrder; await route.fallback(); });
+      try {
+        await top.goto(BASE + "?view=providers", { waitUntil: "commit" });
+        await top.waitForFunction(() => document.querySelector("#nav > .thumb")?.style.width);
+        await arranged(top, HOME);
+      } finally {
+        releaseOrder();
+      }
+      await arranged(top, want);
+      const selection = await top.evaluate(() => {
+        const active = document.querySelector("#nav > button.on");
+        const tab = active.getBoundingClientRect();
+        const thumb = document.querySelector("#nav > .thumb").getBoundingClientRect();
+        return { view: active.dataset.view, left: Math.abs(tab.left - thumb.left), width: Math.abs(tab.width - thumb.width) };
+      });
+      assert.equal(selection.view, "providers");
+      assert.ok(selection.left < 2 && selection.width < 2, "the top indicator follows Providers after startup reorder: " + JSON.stringify(selection));
+      assert.deepEqual(top.errors, []);
+      await top.context().close();
+
       // a phone's tab bar: the first four shown, the rest under More
       const phone = await open(browser, { lang, web: true, phone: true });
       await phone.goto(BASE);
