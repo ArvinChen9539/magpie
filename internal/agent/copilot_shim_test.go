@@ -135,3 +135,35 @@ func TestCopilotLauncherBesideTheBuildsHashFolderIsNotTheCLI(t *testing.T) {
 		t.Error("a folder beside bin that is no build's hash counts as an editor's install")
 	}
 }
+
+func TestCopilotFindsCLIAfterEditorLauncher(t *testing.T) {
+	home := t.TempDir()
+	install := filepath.Join(t.TempDir(), "Microsoft VS Code")
+	shim := filepath.Join(install, "bin", "copilot-shim")
+	links := filepath.Join(home, "Microsoft", "WinGet", "Links")
+	name := "copilot"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+		t.Setenv("PATHEXT", ".EXE;.CMD")
+		writeAt(t, filepath.Join(shim, "copilot"), "vscode-copilot-launcher\n")
+	}
+	writeAt(t, filepath.Join(install, "69047191fc", "resources", "app", "product.json"), `{"nameShort":"Visual Studio Code"}`)
+	want := filepath.Join(links, name)
+	for _, path := range []string{filepath.Join(shim, name), want} {
+		writeAt(t, path, "copilot\n")
+		if err := os.Chmod(path, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	t.Setenv("PATH", shim+string(os.PathListSeparator)+links)
+	a := copilot(home, filepath.Join(home, ".config"))
+	if !a.Detected() {
+		t.Error("Copilot CLI is not detected behind the editor launcher")
+	}
+	if got := a.BinPath(); got != want {
+		t.Errorf("BinPath = %q, want %q", got, want)
+	}
+	if got, _ := a.cliBin(); got != want {
+		t.Errorf("cliBin = %q, want %q", got, want)
+	}
+}

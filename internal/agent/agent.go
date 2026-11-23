@@ -412,6 +412,22 @@ func (a *Agent) binsOwn(bin string) bool {
 	return bin != "" && (a.binNot == nil || !a.binNot(bin))
 }
 
+func (a *Agent) ownBin() string {
+	if a.Bin == "" {
+		return ""
+	}
+	bin := binAt(a.Bin)
+	if bin == "" || a.binsOwn(bin) {
+		return bin
+	}
+	for _, candidate := range proc.FindTools(a.Bin) {
+		if candidate != bin && a.binsOwn(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
 // Running reports whether a process whose command line matches any pattern
 // (an extended regexp, as for pgrep -f) is alive. Windows can't be asked
 // what runs, so anything may be: every caller is the advice an agent's own
@@ -481,7 +497,7 @@ func (a *Agent) Detected() bool {
 	if a.sign != nil && a.sign() {
 		return true
 	}
-	if a.Bin != "" && a.binsOwn(binAt(a.Bin)) {
+	if a.ownBin() != "" {
 		return true
 	}
 	// one with no Bin, as its command's name is other tools' too, that

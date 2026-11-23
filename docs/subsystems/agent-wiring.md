@@ -10,6 +10,10 @@ something else shows up as drift.
 
 ## Responsibilities and sources of truth
 
+Agent detection and CLI lookup skip VS Code's bundled Copilot launcher and
+continue through the remaining PATH entries and known user tool directories
+for a standalone Copilot CLI (`Agent.ownBin`, #6679).
+
 | Part | Responsibility | Source |
 | --- | --- | --- |
 | Agent description | `Agent` has an id, name, icon, `Bin` and `Dir` for detection, `Path`, `Fields` and `Native`. It also has optional hooks: `Notice`, `UA`, `ListsModels`, `Sync`, `Unwire`, `Join`/`Joined`, `Routed`, `Follow`, `RenameRefs`, `Check`, `LastUsed`, `Reached`, `Import`/`Added`, `Launch`, `SplitSuffix`, `Spelled` and `ModelAliases`. Each hook's comment says which agents need it. A `Dir` holding only its `signIn` file (Codex's `auth.json`, Claude Code's `.credentials.json`), which a sign-in added in magpie writes for an agent signed in to nothing, is no sign the agent is installed (`TestSignInFileAloneIsNoAgent`; jiangshangmuyun on X). | [`agent.go`](../../internal/agent/agent.go) |
