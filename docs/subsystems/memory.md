@@ -241,7 +241,7 @@ further (`State.Since`), unless a range is picked.
   (`TestOldConversationReadOnce`). It is written through temp-and-rename
   under a file lock; an unreadable file runs nothing
   (`TestUnreadableStateRunsNothing`).
-- `Keep` runs 5 minutes after the GUI backend starts, then hourly
+- `Keep` runs 5 minutes after the shared desktop or Web backend starts, then hourly
   (`keepDistilling` in `internal/gui/memory_distill.go`). `Run` takes at
   most 30 conversations (`PerRun`, more than a busy hour brings) quiet for 30 minutes (`Quiet`) with at
   least two turns, and skips subagent sessions and its own agent

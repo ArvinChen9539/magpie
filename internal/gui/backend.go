@@ -62,6 +62,8 @@ func startBackend() (gw *gateway.Server) {
 	// the compactions magpie made in Codex's threads written as Codex's
 	// own, so a thread goes on when Codex talks to OpenAI itself
 	go agent.KeepCodexRolloutsPortable(backendCtx)
+	go keepDistilling(backendCtx)
+	go keepEmbedding(backendCtx)
 	// Model lists are fetched, never compiled in: whatever the agents can see
 	// comes from the models.dev catalog plus each vendor's own /models answer.
 	// Keep both halves warm without making the user click anything.
