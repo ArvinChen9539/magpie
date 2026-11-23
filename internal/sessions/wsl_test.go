@@ -3,9 +3,12 @@ package sessions
 import (
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/yetone/magpie/internal/settings"
 )
 
 // wslSettle waits for the listing of the WSL distros under way, if any.
@@ -41,6 +44,70 @@ func wslDistro(t *testing.T) (home string, running *bool) {
 	t.Cleanup(func() { wslFirstWait = was })
 	Reset()
 	return home, &on
+}
+
+func TestWSLClaudeWorkflowsOptIn(t *testing.T) {
+	home, _ := wslDistro(t)
+	const sessionID = "11111111-2222-3333-4444-555555555555"
+	subs := filepath.Join(home, ".claude", "projects", "-work-app", sessionID, "subagents")
+	workflow := filepath.Join(subs, "workflows", "run", "agent-workflow.jsonl")
+	direct := filepath.Join(subs, "agent-direct.jsonl")
+	writeSubagent := func(path, id, model string) {
+		writeLines(t, path, strings.NewReplacer(`"sess1"`, `"`+sessionID+`"`, `"isSidechain":false`, `"isSidechain":true`).Replace(
+			claudeMsg(id, model, 5, 6, 7, 8, 2)))
+	}
+	writeSubagent(workflow, "wsl-workflow", "claude-sonnet-5-5")
+	writeSubagent(direct, "wsl-direct", "claude-opus-5-5")
+	check := func(wantWorkflow bool) {
+		t.Helper()
+		files := wslFiles("claude")
+		has := func(path string) bool { return slices.ContainsFunc(files, func(f file) bool { return f.path == path }) }
+		if !has(direct) || has(workflow) != wantWorkflow {
+			t.Fatalf("Claude files do not match workflow opt-in %v: %+v", wantWorkflow, files)
+		}
+		const directModel, workflowModel = "claude-opus-5-5", "claude-sonnet-5-5"
+		list := List(All)
+		index := slices.IndexFunc(list, func(session Session) bool { return session.ID == sessionID })
+		if index < 0 || !slices.ContainsFunc(list[index].Models, func(model Model) bool { return model.Model == directModel }) ||
+			slices.ContainsFunc(list[index].Models, func(model Model) bool { return model.Model == workflowModel }) != wantWorkflow {
+			t.Fatalf("session list does not match workflow opt-in %v: %+v", wantWorkflow, list)
+		}
+		stats := StatsFor(0)
+		index = slices.IndexFunc(stats.Sessions, func(session Summary) bool { return session.ID == sessionID })
+		if index < 0 || !slices.Contains(stats.Sessions[index].Models, directModel) ||
+			slices.Contains(stats.Sessions[index].Models, workflowModel) != wantWorkflow {
+			t.Fatalf("session stats do not match workflow opt-in %v: %+v", wantWorkflow, stats.Sessions)
+		}
+		if count := stats.Overview("claude", workflowModel, "/work/app", 1).Count; (count > 0) != wantWorkflow {
+			t.Fatalf("overview counts %d workflow sessions with opt-in %v", count, wantWorkflow)
+		}
+		calls := Calls(time.Time{})
+		if !slices.ContainsFunc(calls, func(c Call) bool { return c.RequestID == "req_wsl-direct" }) ||
+			slices.ContainsFunc(calls, func(c Call) bool { return c.RequestID == "req_wsl-workflow" }) != wantWorkflow {
+			t.Fatalf("calls do not match workflow opt-in %v: %+v", wantWorkflow, calls)
+		}
+	}
+	check(false)
+	directoryCache.Lock()
+	_, visited := directoryCache.entries[filepath.Join(subs, "workflows")]
+	directoryCache.Unlock()
+	if visited {
+		t.Fatal("WSL discovery enumerated the workflows directory without opting in")
+	}
+	config := settings.Load()
+	config.WSLClaudeWorkflows = true
+	if err := settings.Save(config); err != nil {
+		t.Fatal(err)
+	}
+	wslReset()
+	wslFiles("claude")
+	wslSettle()
+	check(true)
+	config.WSLClaudeWorkflows = false
+	if err := settings.Save(config); err != nil {
+		t.Fatal(err)
+	}
+	check(false)
 }
 
 // The sessions of Claude Code, Codex, Pi and omp in a WSL distro are listed

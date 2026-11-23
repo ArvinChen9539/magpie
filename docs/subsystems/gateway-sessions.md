@@ -1033,6 +1033,14 @@ reporter's real wire files), `TestCodeBuddyCalls`, `TestWorkBuddyCalls*`,
 `TestPiCalls*` (Pi 1.1.0's and omp 18.9.1's own files) and
 `TestWSLSessionsListed`.
 
+On Windows, WSL Claude Code discovery reads main sessions and direct
+subagents by default. Nested `subagents/workflows` transcripts can number
+in the hundreds of thousands (#7315), so discovery skips those directories
+and listings ignore their cached entries. Their usage is excluded from
+Sessions and Calls until `wslClaudeWorkflows` is set to `true` in
+`settings.json` and magpie is restarted. Local Claude Code discovery
+still includes workflow transcripts.
+
 Antigravity CLI's (agy's) conversations are sessions too (RickyWei on
 Discord): one per `brain/<conversation id>/` of `~/.gemini/antigravity-cli`,
 read from the same `transcript_full.jsonl` its calls are (`agyFiles`,

@@ -789,7 +789,8 @@ type Settings struct {
 	// NoWSLAgents stops magpie looking in WSL on its own, on Windows
 	// (#1264): no distro is listed or probed for agents, their sessions or
 	// Claude Code, and the agents found there before aren't shown.
-	NoWSLAgents bool `json:"noWSLAgents,omitempty"`
+	NoWSLAgents        bool `json:"noWSLAgents,omitempty"`
+	WSLClaudeWorkflows bool `json:"wslClaudeWorkflows,omitempty"`
 	// KeepAwakeDisplay keeps the display on too while KeepAwake holds the
 	// computer awake (#975, Hu9956: an agent recording the screen to check
 	// its work found it locked). This computer's own (KeepOwn).
@@ -1870,6 +1871,7 @@ func (s *Settings) KeepOwn(cur Settings) {
 	s.TrayWindows, s.TrayNoNumber, s.TrayCurrency, s.TrayAnthropicMark = cur.TrayWindows, cur.TrayNoNumber, cur.TrayCurrency, cur.TrayAnthropicMark
 	s.GatewayMode = cur.GatewayMode
 	s.NoWSLAgents = cur.NoWSLAgents
+	s.WSLClaudeWorkflows = cur.WSLClaudeWorkflows
 	s.QuotaReads = cur.QuotaReads
 	s.NoAccountDiscovery = cur.NoAccountDiscovery
 	s.LAN, s.AllowIPs, s.MTLS, s.HTTPS = cur.LAN, cur.AllowIPs, cur.MTLS, cur.HTTPS

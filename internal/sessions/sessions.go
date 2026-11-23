@@ -836,10 +836,16 @@ func parallel(n, per int, one func(i int)) {
 // its workflows (ultracode) in <id>/subagents/workflows/<run>/agent-*.jsonl
 // — beside each run's journal.jsonl, which isn't a transcript.
 func ccFiles(agent, dir string) []file {
+	return ccFilesWithWorkflows(agent, dir, true)
+}
+
+func ccFilesWithWorkflows(agent, dir string, workflows bool) []file {
 	if !Reads(agent) {
 		return nil
 	}
-	return heldFiles("cc\x00"+agent+"\x00"+dir, func() []file { return listCCFiles(agent, dir) })
+	return heldFiles(ccListingKey(agent, dir, workflows), func() []file {
+		return listCCFilesWithWorkflows(agent, dir, workflows)
+	})
 }
 
 // ccListed is each folder's last listCCFiles' paths and keys, in its
@@ -921,13 +927,25 @@ func joinedIs(s, a, b string, sep ...byte) bool {
 func bridged(agent, id string) bool { return agent == "claude" && bridgesid.Is(id) }
 
 func listCCFiles(agent, dir string) []file {
+	return listCCFilesWithWorkflows(agent, dir, true)
+}
+
+func ccListingKey(agent, dir string, workflows bool) string {
+	key := "cc\x00" + agent + "\x00" + dir
+	if !workflows {
+		key += "\x00no-workflows"
+	}
+	return key
+}
+
+func listCCFilesWithWorkflows(agent, dir string, workflows bool) []file {
 	projects := filepath.Join(dir, "projects")
 	watch(dir) // statFiles reads only the projects that changed
-	last, _ := ccListed.Load(dir)
+	key := ccListingKey(agent, dir, workflows)
+	last, _ := ccListed.Load(key)
 	names := ccNames{last: func() []ccName { l, _ := last.([]ccName); return l }()}
 	// listed into a list of its own kept from the last pass, and given as
 	// the last pass's answer when it is the same once stat()ed
-	key := "cc\x00" + agent + "\x00" + dir
 	var out []file
 	if b, ok := ccScratch.LoadAndDelete(key); ok {
 		out = b.([]file)[:0]
@@ -937,7 +955,7 @@ func listCCFiles(agent, dir string) []file {
 	defer func() {
 		// the last listing's names are kept already
 		if names.made || names.at != len(names.last) {
-			ccListed.Store(dir, names.names())
+			ccListed.Store(key, names.names())
 		}
 	}()
 	for _, project := range readDirectory(projects) {
@@ -963,6 +981,9 @@ func listCCFiles(agent, dir string) []file {
 					path, key := names.of(subs, sub.Name(), agent, e.Name())
 					f := file{agent: agent, key: key, path: path}
 					out = append(out, f)
+				}
+				if !workflows {
+					continue
 				}
 				for _, run := range readDirectory(filepath.Join(subs, "workflows")) {
 					if !dirent.IsFolder(filepath.Join(subs, "workflows"), run) {

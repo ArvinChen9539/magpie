@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/yetone/magpie/internal/lastgood"
+	"github.com/yetone/magpie/internal/settings"
 )
 
 // Sessions in WSL. On Windows an agent installed in a WSL distro keeps its
@@ -91,7 +92,7 @@ var wslAgents = []struct{ agent, dir string }{
 }
 
 // wslScan lists the session files under a distro's home.
-func wslScan(h WSLHome) []file {
+func wslScan(h WSLHome, workflows bool) []file {
 	var out []file
 	for _, a := range wslAgents {
 		dir := filepath.Join(h.Home, a.dir)
@@ -100,7 +101,7 @@ func wslScan(h WSLHome) []file {
 		}
 		switch a.agent {
 		case "claude":
-			out = append(out, ccFiles("claude", dir)...)
+			out = append(out, ccFilesWithWorkflows("claude", dir, workflows)...)
 		case "codex":
 			out = append(out, codexFilesIn(dir)...)
 		case "pi":
@@ -214,6 +215,7 @@ func wslFilesAs(calls bool, agents ...string) []file {
 	if len(agents) == 0 || !wslLooking() {
 		return nil
 	}
+	workflows := settings.Shared().WSLClaudeWorkflows
 	wslSess.Lock()
 	if !wslSess.loaded {
 		wslSess.loaded = true
@@ -276,7 +278,7 @@ func wslFilesAs(calls bool, agents ...string) []file {
 		cold := !l.Running || !up[n]
 		in := &fileMore{wsl: n} // the distro's files share it
 		for _, e := range l.Files {
-			if !want[e.Agent] {
+			if !want[e.Agent] || !workflows && e.claudeWorkflow() {
 				continue
 			}
 			f := file{agent: e.Agent, key: e.Key, path: e.Path, main: e.Main, size: e.Size, mod: modOf(e.Mod), more: in, cold: cold, readOnly: e.ReadOnly}
@@ -296,6 +298,14 @@ func wslFilesAs(calls bool, agents ...string) []file {
 	return out
 }
 
+func (e wslEntry) claudeWorkflow() bool {
+	if e.Agent != "claude" || e.Main {
+		return false
+	}
+	workflows := filepath.Dir(filepath.Dir(e.Path))
+	return filepath.Base(workflows) == "workflows" && filepath.Base(filepath.Dir(workflows)) == "subagents"
+}
+
 // wslList lists the distros' files: a running one's afresh, a stopped
 // one's as they were. With no distros said at all (wsl.exe didn't answer)
 // every listing is kept, cold. A wsl.exe that answered with no distro an
@@ -306,6 +316,7 @@ func wslList(gen uint64, done chan struct{}) {
 	wslSess.Lock()
 	old := wslSess.lists
 	wslSess.Unlock()
+	workflows := settings.Shared().WSLClaudeWorkflows
 	lists := map[string]*wslListing{}
 	for _, h := range homes {
 		if h.Distro == "" || h.Home == "" {
@@ -320,7 +331,7 @@ func wslList(gen uint64, done chan struct{}) {
 			continue
 		}
 		l := &wslListing{Home: h.Home, Running: true, Files: []wslEntry{}}
-		for _, f := range wslScan(h) {
+		for _, f := range wslScan(h, workflows) {
 			l.Files = append(l.Files, wslEntryOf(f))
 		}
 		lists[h.Distro] = l
