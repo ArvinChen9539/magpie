@@ -37,8 +37,6 @@ const (
 	balanceHistKept = 45 * 24 * time.Hour
 	balanceHistMax  = 4000
 	balanceHistGap  = 5 * time.Minute
-	// the points a trend is drawn from, and fitted over
-	balanceShowSpan = 14 * 24 * time.Hour
 	balanceFitSpan  = 7 * 24 * time.Hour
 	// a fit needs this many points, this far apart first to last
 	balanceFitPoints = 3
@@ -53,7 +51,7 @@ type BalancePoint struct {
 	Amount float64   `json:"amount"`
 }
 
-// BalanceTrend is a balance's points over balanceShowSpan, oldest first,
+// BalanceTrend is a balance's retained points, oldest first,
 // and the line fitted through the latest of them: spent PerDay a day,
 // from FitFrom (the amount FitStart then) to now (FitNow), running out at
 // RunsOut. With no fit (too few points, or a top-up just now) only Points.
@@ -277,7 +275,7 @@ func noteBalanceHistory(qs []SubscriptionQuota, now time.Time) {
 
 // balanceTrend is pts' trend at now, nil with fewer than two points shown.
 func balanceTrend(pts []BalancePoint, now time.Time) *BalanceTrend {
-	i, _ := slices.BinarySearchFunc(pts, now.Add(-balanceShowSpan), func(p BalancePoint, t time.Time) int { return p.At.Compare(t) })
+	i, _ := slices.BinarySearchFunc(pts, now.Add(-balanceHistKept), func(p BalancePoint, t time.Time) int { return p.At.Compare(t) })
 	shown := slices.Clone(pts[i:])
 	if len(shown) < 2 {
 		return nil

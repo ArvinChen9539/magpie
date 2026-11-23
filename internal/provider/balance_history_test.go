@@ -105,9 +105,19 @@ func TestBalanceTrendRunsOut(t *testing.T) {
 	if tr := balanceTrend(slow, now); tr == nil || tr.RunsOut != nil || tr.PerDay <= 0 {
 		t.Fatalf("runs out past a year isn't said: %+v", tr)
 	}
-	old := []BalancePoint{{now.Add(-20 * 24 * time.Hour), 10}, {h(0), 9}}
-	if tr := balanceTrend(old, now); tr != nil {
-		t.Fatalf("one point within the span shown: %+v", tr)
+}
+
+func TestBalanceTrendKeepsHistoryForLongRanges(t *testing.T) {
+	now := time.Date(2026, 10, 5, 12, 0, 0, 0, time.UTC)
+	aged := BalancePoint{now.Add(-20 * 24 * time.Hour), 10}
+	latest := BalancePoint{now, 9}
+	points := []BalancePoint{{now.Add(-46 * 24 * time.Hour), 20}, aged, latest}
+	trend := balanceTrend(points, now)
+	if trend == nil || len(trend.Points) != 2 || trend.Points[0] != aged || trend.Points[1] != latest {
+		t.Fatalf("trend = %+v, want the 20-day-old and latest readings", trend)
+	}
+	if trend.RunsOut != nil || trend.FitFrom != nil || trend.PerDay != 0 {
+		t.Fatalf("old history was fitted into a forecast: %+v", trend)
 	}
 }
 

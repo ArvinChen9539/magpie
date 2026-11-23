@@ -586,6 +586,12 @@ and `TestHistoricalWindowHoldsUsesEachWindowsOwnReading`.
   `TestClaudeSwitchWaitsForClaudeCodesRefresh`,
   `TestClaudeSwitchStaleAndHeldLocks`.
 
+Balance cards expose the retained balance readings (up to 45 days and
+4,000 points per history) to the Usage chart's range selector. The
+run-out forecast still fits only the last seven days since the latest
+top-up. See [`balanceTrend`](../../internal/provider/balance_history.go)
+and `TestBalanceTrendKeepsHistoryForLongRanges`.
+
 ## Verification
 
 ```sh
