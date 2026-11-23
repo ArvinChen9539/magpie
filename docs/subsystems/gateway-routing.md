@@ -624,6 +624,19 @@ the key's leaves the call as asked, with a log line (`compactRefused`).
   `TestUnroutedMaskingNotCutOff`, `TestUnroutedSlotWaitNotCutOff`,
   `TestUnroutedMostLeavesOutMasking`, `TestMaskingModelWaitNotCutOffAtMost`.
 
+### Files returned by translated tool calls
+
+`toolOutput` reads Anthropic `tool_result` documents, Responses
+`function_call_output` files, and Chat tool-message files (#6703).
+An inline PDF follows its `functionResponse` on Gemini, Code Assist,
+and Antigravity's Gemini models. Vertex AI puts the PDF in the next
+user turn, as it does with tool images. Other upstreams and the Claude
+subscription bridge receive an `[attachment …]` note in the result text.
+Other file types, URLs, vendor file IDs, and PDFs with invalid base64
+are described in text. The gateway does not fetch references or send
+them as vendor file parts. A text document contributes its words to the
+tool result. `TestTranslatedToolFiles` covers the three inbound shapes.
+
 ## A route group held to chosen accounts
 
 A routing group may be held to some accounts of a provider (`Group.Accounts`,

@@ -6,6 +6,8 @@
 package gateway
 
 import (
+	"cmp"
+	"encoding/base64"
 	"encoding/json"
 	"slices"
 	"strings"
@@ -64,12 +66,9 @@ type Part struct {
 	IsError    bool
 	Images     []Part         // the images the tool returned beside its text
 	Standalone map[string]any // native Responses notification with no call ID
-	// Audio is the recordings the tool returned (a Chat tool message's
-	// input_audio parts), as File parts with an audio/* type: a Gemini
-	// upstream is given them inline after the response, as its images;
-	// every other upstream is told of them in the result's text, which
-	// toolOutput already ends with a note for each
-	Audio []Part
+	// ToolMedia holds inline recordings and PDFs for Gemini. toolOutput
+	// also describes the attachments in Text for the other upstreams.
+	ToolMedia []Part
 	// Loads are the tools a tool's result loads, by name: Claude Code's
 	// ToolSearch answers with tool_reference blocks naming the deferred
 	// tools it found (#2660)
@@ -1039,20 +1038,14 @@ func stringOrText(raw json.RawMessage) string {
 	return ""
 }
 
-// toolOutput reads a tool's result: its text, as stringOrText reads it,
-// the images in it and the recordings. Anthropic's tool_result holds image
-// blocks, a Responses function_call_output input_image parts and a Chat
-// tool message, from clients that send them, image_url and input_audio
-// parts. An image named only by a vendor's file id has nothing to carry and
-// is left out. Each recording is also told of at the end of the text
-// ("[attachment audio/wav]", as a Chat user's input_audio is told of to an
-// upstream that can't hear it), so an upstream given the text alone knows
-// the tool returned one; a Gemini upstream is given the recording too.
+// toolOutput reads a tool's text, images and inline media across protocols.
+// Attachment notes travel with the text even where inline media cannot.
 func toolOutput(raw json.RawMessage) (string, []Part, []Part) {
 	text := stringOrText(raw)
 	var blocks []struct {
 		Type   string `json:"type"`
 		Source *struct {
+			Type      string `json:"type"`
 			MediaType string `json:"media_type"`
 			Data      string `json:"data"`
 			URL       string `json:"url"`
@@ -1063,11 +1056,39 @@ func toolOutput(raw json.RawMessage) (string, []Part, []Part) {
 			Data   string `json:"data"`
 			Format string `json:"format"`
 		} `json:"input_audio"`
+		FileData string `json:"file_data"`
+		FileURL  string `json:"file_url"`
+		FileID   string `json:"file_id"`
+		Filename string `json:"filename"`
+		File     struct {
+			Data string `json:"file_data"`
+			ID   string `json:"file_id"`
+			Name string `json:"filename"`
+		} `json:"file"`
 	}
 	if len(raw) == 0 || raw[0] != '[' || decodeJSON(raw, &blocks) != nil {
 		return text, nil, nil
 	}
-	var images, audio []Part
+	var images, media []Part
+	var extra strings.Builder
+	writeNote := func(note string) {
+		if note == "" {
+			return
+		}
+		if text != "" || extra.Len() != 0 {
+			extra.WriteByte('\n')
+		}
+		extra.WriteString(note)
+	}
+	addFile := func(file Part) {
+		writeNote(attachmentText(file))
+		if file.MediaType == "application/pdf" && file.Data != "" {
+			file.Data, _ = stdBase64(file.Data)
+			if _, err := base64.StdEncoding.DecodeString(file.Data); err == nil {
+				media = append(media, file)
+			}
+		}
+	}
 	for _, b := range blocks {
 		switch b.Type {
 		case "image":
@@ -1097,17 +1118,28 @@ func toolOutput(raw json.RawMessage) (string, []Part, []Part) {
 			// (chatParts): left out before, so Gemini answered without
 			// it (Parlevent_ on X)
 			if b.InputAudio.Data != "" {
-				audio = append(audio, Part{Kind: File, MediaType: audioType(b.InputAudio.Format), Data: b.InputAudio.Data})
+				file := Part{Kind: File, MediaType: audioType(b.InputAudio.Format), Data: b.InputAudio.Data}
+				media = append(media, file)
+				writeNote(attachmentText(file))
+			}
+		case "document":
+			if source := b.Source; source != nil {
+				switch {
+				case source.Type == "text":
+					writeNote(source.Data)
+				case source.Type == "base64" && source.Data != "":
+					addFile(Part{Kind: File, MediaType: cmp.Or(source.MediaType, "application/octet-stream"), Data: source.Data})
+				case source.Type == "url" && source.URL != "":
+					addFile(Part{Kind: File, MediaType: cmp.Or(source.MediaType, "application/octet-stream"), URL: source.URL})
+				}
+			}
+		case "input_file", "file":
+			if file, ok := chatFile(cmp.Or(b.FileData, b.File.Data), cmp.Or(b.FileURL, b.FileID, b.File.ID), cmp.Or(b.Filename, b.File.Name)); ok {
+				addFile(file)
 			}
 		}
 	}
-	for _, a := range audio {
-		if text != "" {
-			text += "\n"
-		}
-		text += attachmentText(a)
-	}
-	return text, images, audio
+	return text + extra.String(), images, media
 }
 
 // effortOf normalises the reasoning effort names the APIs use.

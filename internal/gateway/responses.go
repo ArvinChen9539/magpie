@@ -480,8 +480,8 @@ func readResponsesFor(body []byte, facts, keepInstructions bool) (*Request, erro
 			case (it.Type == "function_call_output" || it.Type == "custom_tool_call_output") && facts:
 				r.Messages = append(r.Messages, Message{Role: "user", Parts: []Part{{Kind: ToolResult, CallID: it.CallID}}})
 			case it.Type == "function_call_output" || it.Type == "custom_tool_call_output":
-				out, images, audio := toolOutput(it.Output)
-				part := Part{Kind: ToolResult, CallID: it.CallID, Text: out, Images: images, Audio: audio}
+				out, images, media := toolOutput(it.Output)
+				part := Part{Kind: ToolResult, CallID: it.CallID, Text: out, Images: images, ToolMedia: media}
 				if it.CallID == "" {
 					// Native account requests may still need translation to
 					// collect a streamed response for a non-streaming client.
@@ -920,8 +920,7 @@ func orphanedToolOutputs(body []byte) []byte {
 			out = append(out, raw)
 			continue
 		}
-		// a recording is told of in the text: a Chat upstream's user
-		// message takes no audio from magpie (chat.go's File)
+		// The text covers the files that Chat cannot safely carry inline.
 		text, images, _ := toolOutput(item.Output)
 		content := []map[string]any{}
 		if text != "" {

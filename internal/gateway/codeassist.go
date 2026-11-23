@@ -663,15 +663,12 @@ func buildCodeAssistSent(r *Request, sent, agent string) []byte {
 						parts = append(parts, im)
 					}
 				}
-				// the recordings it returned follow as its images do; a
-				// Claude model on Antigravity hears none, and has the
-				// note toolOutput ended the text with
+				// Recordings and PDFs follow the same Gemini path as images.
+				// Claude on Antigravity gets the attachment notes in Text.
 				if !(ag && claude) {
-					for _, a := range p.Audio {
-						if a.Data != "" {
-							toolImage[len(parts)] = true
-							parts = append(parts, geminiInline(a.MediaType, a.Data))
-						}
+					for _, file := range p.ToolMedia {
+						toolImage[len(parts)] = true
+						parts = append(parts, geminiInline(file.MediaType, file.Data))
 					}
 				}
 			}
