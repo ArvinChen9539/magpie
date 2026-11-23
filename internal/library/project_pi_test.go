@@ -1,6 +1,7 @@
 package library
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -101,6 +102,19 @@ func TestProjectPiPackages(t *testing.T) {
 
 func squash(s string) string { return strings.Join(strings.Fields(s), "") }
 
+func checkProjectPiPackageSources(t *testing.T, path string, want ...string) {
+	t.Helper()
+	var settings struct {
+		Packages []string `json:"packages"`
+	}
+	if err := json.Unmarshal([]byte(read(t, path)), &settings); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(settings.Packages, want) {
+		t.Fatalf("packages = %q, want %q", settings.Packages, want)
+	}
+}
+
 // A plugin that is a Pi package, given to a project for Pi (#7243), is one
 // entry of its .pi/settings.json: its folder. Applied again it stays one;
 // withdrawn, only that entry goes; a declaration the project has of the same
@@ -121,20 +135,15 @@ func TestProjectPluginPiPackage(t *testing.T) {
 		ok(t)(AddProject(d))
 	}
 	file := filepath.Join(a, ".pi/settings.json")
-	count := func(p string) int { return strings.Count(read(t, p), dir) }
 
 	// not for Pi: no package
 	ok(t)(ProjectPlugin(a, "acme-kit", []string{"claude"}))
 	gone(t, file)
 	ok(t)(ProjectPlugin(a, "acme-kit", []string{"pi"}))
-	if count(file) != 1 {
-		t.Fatalf("one entry for the plugin:\n%s", read(t, file))
-	}
+	checkProjectPiPackageSources(t, file, dir)
 	ok(t)(ProjectPlugin(a, "acme-kit", []string{"pi"}))
 	ok(t)(ProjectPlugin(a, "acme-kit", []string{"pi", "claude"}))
-	if count(file) != 1 {
-		t.Fatalf("applied again:\n%s", read(t, file))
-	}
+	checkProjectPiPackageSources(t, file, dir)
 	gone(t, filepath.Join(b, ".pi"))
 	ok(t)(ProjectPlugin(a, "acme-kit", nil))
 	gone(t, file)
@@ -154,13 +163,9 @@ func TestProjectPluginPiPackage(t *testing.T) {
 	// beside the project's other packages: only the managed entry goes
 	write(t, file, "{\"packages\": [\"npm:pi-own\"]}\n")
 	ok(t)(ProjectPlugin(a, "acme-kit", []string{"pi"}))
-	if s := read(t, file); count(file) != 1 || !strings.Contains(s, "npm:pi-own") {
-		t.Fatalf("beside:\n%s", s)
-	}
+	checkProjectPiPackageSources(t, file, "npm:pi-own", dir)
 	ok(t)(ProjectPlugin(a, "acme-kit", nil))
-	if s := read(t, file); strings.Contains(s, dir) || !strings.Contains(s, "npm:pi-own") {
-		t.Fatalf("withdrawn:\n%s", s)
-	}
+	checkProjectPiPackageSources(t, file, "npm:pi-own")
 }
 
 // An extension-only Pi package (#7267, jinpwng) is a plugin: the probe
@@ -195,14 +200,9 @@ func TestPiExtensionOnlyPackageIsAPlugin(t *testing.T) {
 	write(t, file, "{\"packages\": [\"npm:pi-own\"]}\n")
 	ok(t)(ProjectPlugin(proj, "acme-pi-guard", []string{"pi"}))
 	ok(t)(ProjectPlugin(proj, "acme-pi-guard", []string{"pi"}))
-	s := read(t, file)
-	if strings.Count(s, pluginDir("acme-pi-guard")) != 1 || !strings.Contains(s, "npm:pi-own") {
-		t.Fatalf("one entry beside the project's own:\n%s", s)
-	}
+	checkProjectPiPackageSources(t, file, "npm:pi-own", pluginDir("acme-pi-guard"))
 	ok(t)(ProjectPlugin(proj, "acme-pi-guard", nil))
-	if s := read(t, file); strings.Contains(s, pluginDir("acme-pi-guard")) || !strings.Contains(s, "npm:pi-own") {
-		t.Fatalf("withdrawn:\n%s", s)
-	}
+	checkProjectPiPackageSources(t, file, "npm:pi-own")
 
 	// a package.json with no "pi" object is no plugin still
 	plain := filepath.Join(t.TempDir(), "plain")
