@@ -1605,7 +1605,7 @@ body.masked :hover > .acct-eye, body.masked .pq-card:hover .acct-eye, body.maske
 /* not the tile's label: .kpi span is its small capitals */
 .kpi small.parts > span { margin-top: 0; font: inherit; letter-spacing: normal; text-transform: none; color: inherit; }
 .led-strip .led-jump { text-align: start; font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 2px; }
-.led-strip .led-jump.bad { color: var(--red); }
+.led-strip .led-jump.led-failed { color: var(--red); }
 .led-strip .led-jump:hover, .led-strip .led-jump.on { text-decoration-style: solid; }
 .led-strip .meter { height: 5px; margin-top: 8px; border-radius: 3px; background: var(--pill); overflow: hidden; }
 .led-strip .meter i { display: block; height: 100%; border-radius: 3px; background: var(--green); }

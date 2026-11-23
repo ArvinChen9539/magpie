@@ -2778,7 +2778,7 @@ function renderLedgerDash(l) {
   // is not a failure, and is counted beside them as answered on a retry
   // (小一 on Discord). Each count is a button for its requests in the list.
   const jump = (text, to, title) => {
-    const b = el("button", "led-jump" + (to === "failed" ? " bad" : "") + (ledStatusOf() === to ? " on" : ""), text);
+    const b = el("button", "led-jump" + (to === "failed" ? " led-failed" : "") + (ledStatusOf() === to ? " on" : ""), text);
     b.type = "button";
     b.title = title;
     b.setAttribute("aria-pressed", ledStatusOf() === to ? "true" : "false");

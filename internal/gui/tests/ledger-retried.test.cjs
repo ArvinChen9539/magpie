@@ -105,7 +105,7 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
         // the card: 3 requests, 1 failed, 1 answered on a retry, each a button
         const card = page.locator("#ledKpi .blk").nth(1);
         assert.equal((await card.locator(".v").textContent()).trim(), "3");
-        const failed = card.locator("button.led-jump.bad"), retried = card.locator("button.led-jump:not(.bad)");
+        const failed = card.locator("button.led-jump.led-failed"), retried = card.locator("button.led-jump:not(.led-failed)");
         assert.equal(await failed.textContent(), await tr("{n} failed", { n: "1" }));
         assert.equal(await retried.textContent(), await tr("{n} answered on a retry", { n: "1" }));
         assert.equal(await failed.getAttribute("title"), await tr("Show the requests a try failed on, with those a later try answered"));
@@ -156,16 +156,16 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
         // handed to, each counted by how it ended
         await page.waitForFunction(() => document.querySelectorAll(".led tbody tr.led-row").length === 3);
         assert.equal(await page.locator("#ledStatus .opt.on").textContent(), await tr("Failed"));
-        assert.equal(await card.locator("button.led-jump.bad").getAttribute("aria-pressed"), "true");
+        assert.equal(await card.locator("button.led-jump.led-failed").getAttribute("aria-pressed"), "true");
         assert.equal(await status(0), "200 · " + (await tr("{n} tries", { n: 3 })));
         assert((await page.locator("#ledSum").textContent()).includes((await tr("{n} failed", { n: "1" })) + " · " + (await tr("{n} answered on a retry", { n: "1" }))));
         // pressed again: every request
-        q = await press(card.locator("button.led-jump.bad"));
+        q = await press(card.locator("button.led-jump.led-failed"));
         assert.equal(q.get("failed"), null);
         await rows.nth(3).waitFor();
         assert.equal(await page.locator("#ledStatus .opt.on").textContent(), await tr("All"));
 
-        q = await press(card.locator("button.led-jump:not(.bad)"));
+        q = await press(card.locator("button.led-jump:not(.led-failed)"));
         assert.equal(q.get("retried"), "1");
         assert.equal(q.get("failed"), null);
         await page.waitForFunction(() => document.querySelectorAll(".led tbody tr.led-row").length === 1);
