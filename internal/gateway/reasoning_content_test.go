@@ -2,9 +2,11 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -267,5 +269,210 @@ func TestMadeReasoningSaysItsTextOnce(t *testing.T) {
 			}
 			assertResendable(t, it, "counting the lines")
 		})
+	}
+}
+
+func TestRelayedReasoningSummaryLifecycle(t *testing.T) {
+	fresh(t)
+	const output = `[` + dskItem + `,{"type":"reasoning","id":"rs_native","summary":[],"encrypted_content":"native-seal"},{"type":"message","id":"msg_1","role":"assistant","status":"completed","phase":"final_answer","content":[{"type":"output_text","text":"42 lines","annotations":[]}]}]`
+	upstream := sse(
+		`event: response.created`+"\n"+`data: {"type":"response.created","sequence_number":0,"response":{"id":"resp_dsk","status":"in_progress","output":[]}}`,
+		`event: response.output_item.added`+"\n"+`data: {"type":"response.output_item.added","sequence_number":1,"output_index":0,"item":{"type":"reasoning","id":"rs_dsk1","status":"in_progress","content":[],"summary":[],"encrypted_content":"dskseal0000000000000000000000000000000"}}`,
+		`event: response.content_part.added`+"\n"+`data: {"type":"response.content_part.added","sequence_number":2,"output_index":0,"item_id":"rs_dsk1","content_index":0,"part":{"type":"reasoning_text","text":""}}`,
+		`event: response.reasoning_text.delta`+"\n"+`data: {"type":"response.reasoning_text.delta","sequence_number":3,"output_index":0,"item_id":"rs_dsk1","content_index":0,"delta":"counting "}`,
+		`event: response.reasoning_text.delta`+"\n"+`data: {"type":"response.reasoning_text.delta","sequence_number":4,"output_index":0,"item_id":"rs_dsk1","content_index":0,"delta":"the lines"}`,
+		`event: response.reasoning_text.done`+"\n"+`data: {"type":"response.reasoning_text.done","sequence_number":5,"output_index":0,"item_id":"rs_dsk1","content_index":0,"text":"counting the lines"}`,
+		`event: response.content_part.done`+"\n"+`data: {"type":"response.content_part.done","sequence_number":6,"output_index":0,"item_id":"rs_dsk1","content_index":0,"part":{"type":"reasoning_text","text":"counting the lines"}}`,
+		`event: response.output_item.done`+"\n"+`data: {"type":"response.output_item.done","sequence_number":7,"output_index":0,"item":`+dskItem+`}`,
+		`data: {"type":"response.output_item.added","sequence_number":8,"output_index":1,"item":{"type":"reasoning","id":"rs_native","summary":[]}}`,
+		`data: {"type":"response.output_item.done","sequence_number":9,"output_index":1,"item":{"type":"reasoning","id":"rs_native","summary":[],"encrypted_content":"native-seal"}}`,
+		`data: {"type":"response.output_item.added","sequence_number":10,"output_index":2,"item":{"type":"message","id":"msg_1","role":"assistant","content":[]}}`,
+		`data: {"type":"response.content_part.added","sequence_number":11,"output_index":2,"item_id":"msg_1","content_index":0,"part":{"type":"output_text","text":"","annotations":[]}}`,
+		`data: {"type":"response.output_text.delta","sequence_number":12,"output_index":2,"item_id":"msg_1","content_index":0,"delta":"42 lines"}`,
+		`event: response.completed`+"\n"+`data: {"type":"response.completed","sequence_number":13,"response":{"id":"resp_dsk","status":"completed","output":`+output+`,"usage":{"input_tokens":5,"output_tokens":2}}}`,
+	)
+	saveDSK(t, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/models") {
+			io.WriteString(w, `{"models":[{"slug":"deepseek-flash","visibility":"list"}]}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		io.WriteString(w, upstream)
+	}))
+	rec := codexPostTo(New(), `{"model":"dsk/deepseek-flash","stream":true,"store":false,"input":[{"type":"message","role":"user","content":"count the lines"}]}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%d %s", rec.Code, rec.Body)
+	}
+	wantTypes := []string{
+		"response.created", "response.output_item.added", "response.reasoning_summary_part.added",
+		"response.reasoning_summary_text.delta", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done",
+		"response.reasoning_summary_part.done", "response.output_item.done", "response.output_item.added", "response.output_item.done",
+		"response.output_item.added", "response.content_part.added", "response.output_text.delta", "response.completed",
+	}
+	var count int
+	var deltas strings.Builder
+	if err := readSSE(strings.NewReader(rec.Body.String()), func(name, data string) error {
+		var event struct {
+			Type         string `json:"type"`
+			Sequence     *int   `json:"sequence_number"`
+			ItemID       string `json:"item_id"`
+			OutputIndex  *int   `json:"output_index"`
+			SummaryIndex *int   `json:"summary_index"`
+			ContentIndex *int   `json:"content_index"`
+			Delta        string `json:"delta"`
+			Text         string `json:"text"`
+			Part         rText  `json:"part"`
+		}
+		if err := json.Unmarshal([]byte(data), &event); err != nil {
+			return err
+		}
+		if count >= len(wantTypes) || event.Type != wantTypes[count] || event.Sequence == nil || *event.Sequence != count {
+			t.Fatalf("unexpected event at sequence %d: %s", count, data)
+		}
+		if (name != "" || count <= 7 || count == 13) && name != event.Type {
+			t.Fatalf("SSE event name %q disagrees with type %q", name, event.Type)
+		}
+		if count >= 2 && count <= 6 {
+			if event.ItemID != "rs_dsk1" || event.OutputIndex == nil || *event.OutputIndex != 0 || event.SummaryIndex == nil || *event.SummaryIndex != 0 || event.ContentIndex != nil {
+				t.Fatalf("wrong summary part identity at sequence %d: %s", count, data)
+			}
+			switch count {
+			case 2:
+				if event.Part.Type != "summary_text" || event.Part.Text != "" {
+					t.Fatalf("summary must start empty: %s", data)
+				}
+			case 3, 4:
+				deltas.WriteString(event.Delta)
+			case 5:
+				if event.Text != deltas.String() {
+					t.Fatalf("summary text.done disagrees with deltas: %s", data)
+				}
+			case 6:
+				if event.Part.Type != "summary_text" || event.Part.Text != deltas.String() {
+					t.Fatalf("summary part.done disagrees with deltas: %s", data)
+				}
+			}
+		}
+		count++
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if count != len(wantTypes) || deltas.String() != "counting the lines" {
+		t.Fatalf("got %d events and reasoning %q", count, deltas.String())
+	}
+	done, completed := clientReasoning(t, rec.Body.String())
+	if len(done) != 2 || !reflect.DeepEqual(done, completed) {
+		t.Fatalf("done and completed reasoning disagree: %v / %v", done, completed)
+	}
+	assertResendable(t, done[0], deltas.String())
+	if done[1]["encrypted_content"] != "native-seal" || !strings.Contains(rec.Body.String(), `"content_index":0,"delta":"42 lines"`) {
+		t.Fatalf("unrelated reasoning or message changed: %s", rec.Body)
+	}
+}
+
+func TestRelayedReasoningKeepsFirstStreamedForm(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		rawFirst bool
+		want     string
+	}{
+		{"raw first", true, "the full thought"},
+		{"summary first", false, "the short thought"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			const item = `{"type":"reasoning","id":"rs_mix","status":"completed","encrypted_content":"foreign-seal","summary":[{"type":"summary_text","text":"the short thought"}],"content":[{"type":"reasoning_text","text":"the full thought"}]}`
+			var frames []string
+			add := func(typ, fields string) {
+				frames = append(frames, fmt.Sprintf("event: %s\ndata: {\"type\":%q,\"sequence_number\":%d,%s}", typ, typ, len(frames), fields))
+			}
+			add("response.output_item.added", `"output_index":0,"item":{"type":"reasoning","id":"rs_mix","summary":[],"content":[]}`)
+			type form struct{ part, text, index, partType, delta string }
+			raw := form{"content_part", "reasoning_text", "content_index", "reasoning_text", "the full thought"}
+			native := form{"reasoning_summary_part", "reasoning_summary_text", "summary_index", "summary_text", "the short thought"}
+			first, second := native, raw
+			if test.rawFirst {
+				first, second = raw, native
+			}
+			part := func(f form, suffix, text string) {
+				add("response."+f.part+suffix, fmt.Sprintf(`"output_index":0,"item_id":"rs_mix",%q:0,"part":{"type":%q,"text":%q}`, f.index, f.partType, text))
+			}
+			text := func(f form, suffix, field string) {
+				add("response."+f.text+suffix, fmt.Sprintf(`"output_index":0,"item_id":"rs_mix",%q:0,%q:%q`, f.index, field, f.delta))
+			}
+			part(first, ".added", "")
+			part(second, ".added", "")
+			text(second, ".delta", "delta")
+			text(first, ".delta", "delta")
+			text(first, ".done", "text")
+			part(first, ".done", first.delta)
+			text(second, ".done", "text")
+			part(second, ".done", second.delta)
+			add("response.output_item.done", `"output_index":0,"item":`+item)
+			add("response.output_text.delta", `"output_index":1,"item_id":"msg_1","content_index":0,"delta":"answer"`)
+			add("response.completed", `"response":{"output":[`+item+`]}`)
+			input := []byte(strings.ReplaceAll(sse(frames...), "\n", "\r\n"))
+			tidy := reasoningTidy{sse: true}
+			var output strings.Builder
+			for len(input) > 0 {
+				size := min(17, len(input))
+				output.Write(tidy.write(input[:size]))
+				input = input[size:]
+			}
+			output.Write(tidy.flush())
+			var types []string
+			if err := readSSE(strings.NewReader(output.String()), func(name, data string) error {
+				var event struct {
+					Type  string `json:"type"`
+					Seq   *int   `json:"sequence_number"`
+					Delta string `json:"delta"`
+					Text  string `json:"text"`
+					Part  rText  `json:"part"`
+				}
+				if err := json.Unmarshal([]byte(data), &event); err != nil {
+					return err
+				}
+				if event.Seq == nil || *event.Seq != len(types) || name != event.Type {
+					t.Fatalf("wrong sequence or SSE name %q for %s", name, data)
+				}
+				types = append(types, event.Type)
+				for _, thought := range []string{event.Text, event.Part.Text} {
+					if thought != "" && thought != test.want {
+						t.Fatalf("wrong reasoning finish %q, want %q", thought, test.want)
+					}
+				}
+				if event.Type == "response.reasoning_summary_text.delta" && event.Delta != test.want {
+					t.Fatalf("wrong reasoning delta %q, want %q", event.Delta, test.want)
+				}
+				return nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			wantTypes := []string{"response.output_item.added", "response.reasoning_summary_part.added", "response.reasoning_summary_text.delta", "response.reasoning_summary_text.done", "response.reasoning_summary_part.done", "response.output_item.done", "response.output_text.delta", "response.completed"}
+			if !reflect.DeepEqual(types, wantTypes) {
+				t.Fatalf("got events %v, want %v", types, wantTypes)
+			}
+			done, completed := clientReasoning(t, output.String())
+			if len(done) != 1 || !reflect.DeepEqual(done, completed) {
+				t.Fatalf("done and completed reasoning disagree: %v / %v", done, completed)
+			}
+			assertResendable(t, done[0], test.want)
+			if summary, _ := done[0]["summary"].([]any); len(summary) != 1 {
+				t.Fatalf("expected one summary part, got %v", summary)
+			}
+		})
+	}
+}
+
+func TestReasoningTidyLeavesNativeSummaryStreamUntouched(t *testing.T) {
+	var frames []string
+	for _, data := range responsesSealedStream {
+		frames = append(frames, "data: "+data)
+	}
+	input := sse(append(frames, `data: [DONE]`)...)
+	tidy := reasoningTidy{sse: true}
+	output := string(tidy.write([]byte(input))) + string(tidy.flush())
+	if output != input {
+		t.Fatalf("native summary stream changed: %s", output)
 	}
 }

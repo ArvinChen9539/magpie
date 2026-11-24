@@ -93,13 +93,20 @@ func magpieMadeReasoningRaw(raw json.RawMessage, id string) json.RawMessage {
 	return b
 }
 
-// reasoningTidy makes a Responses upstream's reasoning items that carry
-// their text in it into the items magpie makes, in a reply relayed as it
-// came, its events' sequence numbers and every other line kept as the
-// upstream wrote them. A reply that isn't a stream is gone through whole.
+// reasoningTidy moves relayed Responses reasoning content to summaries,
+// including the events that build those parts. When both forms are streamed
+// for one item, it keeps the first form and closes gaps from skipped events.
 type reasoningTidy struct {
-	sse bool
-	buf []byte
+	sse     bool
+	buf     []byte
+	items   map[int64]*streamedReasoning
+	skipped int64
+}
+
+type streamedReasoning struct {
+	rawFirst bool
+	sawRaw   bool
+	parts    map[int64]*strings.Builder
 }
 
 func (t *reasoningTidy) write(b []byte) []byte {
@@ -107,12 +114,8 @@ func (t *reasoningTidy) write(b []byte) []byte {
 	if !t.sse {
 		return nil
 	}
-	i := bytes.LastIndexByte(t.buf, '\n')
-	if i < 0 {
-		return nil
-	}
-	out := t.lines(t.buf[:i+1])
-	t.buf = append(t.buf[:0], t.buf[i+1:]...)
+	out, rest := tidyEvents(t.buf, t.frame)
+	t.buf = rest
 	return out
 }
 
@@ -120,81 +123,200 @@ func (t *reasoningTidy) flush() []byte {
 	b := t.buf
 	t.buf = nil
 	if !t.sse {
-		if out, ok := t.event(b); ok {
+		if out, _, _ := t.rewrite(b); out != nil {
 			return out
 		}
 		return b
 	}
-	return t.lines(b)
+	return t.frame(b)
 }
 
-func (t *reasoningTidy) lines(b []byte) []byte {
-	if !bodyHas(b, `"reasoning"`) {
-		return append([]byte(nil), b...)
+func (t *reasoningTidy) frame(frame []byte) []byte {
+	if t.skipped == 0 && !bodyHas(frame, `"reasoning"`) && !bodyHas(frame, "reasoning_text") && !bodyHas(frame, "reasoning_summary_") {
+		return frame
 	}
-	var out []byte
-	for len(b) > 0 {
-		line := b
-		if i := bytes.IndexByte(b, '\n'); i >= 0 {
-			line, b = b[:i+1], b[i+1:]
-		} else {
-			b = nil
-		}
-		body := bytes.TrimRight(line, "\r\n")
-		data, ok := bytes.CutPrefix(body, []byte("data:"))
-		if !ok || !bodyHas(data, `"reasoning"`) {
-			out = append(out, line...)
-			continue
-		}
-		nb, ok := t.event(data)
-		if !ok {
-			out = append(out, line...)
-			continue
-		}
-		out = append(append(append(out, "data: "...), nb...), line[len(body):]...)
+	data, name, skip := t.rewrite(eventData(frame))
+	if skip {
+		return nil
 	}
-	return out
+	if data == nil {
+		return frame
+	}
+	if name != "" {
+		for start := 0; start < len(frame); {
+			line, _, _ := bytes.Cut(frame[start:], []byte("\n"))
+			if bytes.HasPrefix(line, []byte("event:")) {
+				end := start + len(bytes.TrimSuffix(line, []byte("\r")))
+				frame = bytes.Join([][]byte{frame[:start], []byte("event: " + name), frame[end:]}, nil)
+				break
+			}
+			start += len(line) + 1
+		}
+	}
+	return withData(frame, data)
 }
 
-// event is an SSE event's data, or a whole reply, with its reasoning items
-// that carry their text made into magpie's, and whether one was.
-func (t *reasoningTidy) event(data []byte) ([]byte, bool) {
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.UseNumber()
+// rewrite returns changed JSON, a replacement SSE name, and whether to drop
+// a frame that belongs to the item's second reasoning form.
+func (t *reasoningTidy) rewrite(data []byte) ([]byte, string, bool) {
 	var ev map[string]any
-	if dec.Decode(&ev) != nil || ev == nil {
-		return nil, false
+	if decodeNumbers(data, &ev) != nil || ev == nil {
+		return nil, "", false
 	}
-	changed := madeOver(ev["item"])
+	output, hasOutput := reasoningIndex(ev["output_index"])
+	seq, hasSeq := reasoningIndex(ev["sequence_number"])
+	var name string
+	if t.sse && hasOutput {
+		if part, rename, ok := reasoningSummaryEvent(ev); ok {
+			if !t.keepPart(output, part, rename != "", ev) {
+				if hasSeq {
+					t.skipped++
+				}
+				return nil, "", true
+			}
+			name = rename
+			if name != "" {
+				ev["type"] = name
+				ev["summary_index"] = ev["content_index"]
+				delete(ev, "content_index")
+				if part, _ := ev["part"].(map[string]any); part != nil {
+					part["type"] = "summary_text"
+				}
+			}
+		}
+	}
+	changed := name != ""
+	var streamed *streamedReasoning
+	if hasOutput {
+		streamed = t.items[output]
+	}
+	if t.madeOver(ev["item"], streamed) {
+		changed = true
+	}
 	res, _ := ev["response"].(map[string]any)
 	if res == nil && ev["object"] == "response" {
 		res = ev
 	}
 	if res != nil {
 		out, _ := res["output"].([]any)
-		for _, it := range out {
-			if madeOver(it) {
+		for index, it := range out {
+			if t.madeOver(it, t.items[int64(index)]) {
 				changed = true
 			}
 		}
 	}
+	if hasSeq && t.skipped != 0 {
+		ev["sequence_number"] = seq - t.skipped
+		changed = true
+	}
 	if !changed {
-		return nil, false
+		return nil, "", false
 	}
 	nb, err := marshalPlain(ev)
 	if err != nil {
-		return nil, false
+		return nil, "", false
 	}
-	return nb, true
+	return nb, name, false
+}
+
+func reasoningIndex(value any) (int64, bool) {
+	number, ok := value.(json.Number)
+	if !ok {
+		return 0, false
+	}
+	index, err := number.Int64()
+	return index, err == nil && index >= 0
+}
+
+func reasoningSummaryEvent(ev map[string]any) (int64, string, bool) {
+	typ, _ := ev["type"].(string)
+	var name string
+	switch typ {
+	case "response.reasoning_summary_part.added", "response.reasoning_summary_part.done",
+		"response.reasoning_summary_text.delta", "response.reasoning_summary_text.done":
+		index, ok := reasoningIndex(ev["summary_index"])
+		return index, "", ok
+	case "response.reasoning_text.delta", "response.reasoning_text.done":
+		name = strings.Replace(typ, "reasoning_text", "reasoning_summary_text", 1)
+	case "response.content_part.added", "response.content_part.done":
+		part, _ := ev["part"].(map[string]any)
+		if part["type"] != "reasoning_text" {
+			return 0, "", false
+		}
+		name = strings.Replace(typ, "content_part", "reasoning_summary_part", 1)
+	default:
+		return 0, "", false
+	}
+	index, ok := reasoningIndex(ev["content_index"])
+	return index, name, ok
+}
+
+func (t *reasoningTidy) keepPart(output, index int64, raw bool, ev map[string]any) bool {
+	item := t.items[output]
+	if item == nil {
+		if t.items == nil {
+			t.items = map[int64]*streamedReasoning{}
+		}
+		item = &streamedReasoning{rawFirst: raw, parts: map[int64]*strings.Builder{}}
+		t.items[output] = item
+	}
+	item.sawRaw = item.sawRaw || raw
+	if item.rawFirst != raw {
+		return false
+	}
+	text := item.parts[index]
+	if text == nil {
+		text = &strings.Builder{}
+		item.parts[index] = text
+	}
+	if delta, ok := ev["delta"].(string); ok {
+		text.WriteString(delta)
+	} else {
+		part, _ := ev["part"].(map[string]any)
+		full, ok := ev["text"].(string)
+		if !ok {
+			full, ok = part["text"].(string)
+		}
+		if ok {
+			text.Reset()
+			text.WriteString(full)
+		}
+	}
+	return true
+}
+
+func (item *streamedReasoning) summary() []rText {
+	parts := make([]rText, 0, len(item.parts))
+	for index := int64(0); index < int64(len(item.parts)); index++ {
+		text := item.parts[index]
+		if text == nil {
+			return nil
+		}
+		parts = append(parts, rText{Type: "summary_text", Text: text.String()})
+	}
+	return parts
 }
 
 // madeOver makes item, a reasoning item with its text in it, one of
 // magpie's, in place, and reports whether it was.
-func madeOver(item any) bool {
+func (t *reasoningTidy) madeOver(item any, streamed *streamedReasoning) bool {
 	im, _ := item.(map[string]any)
 	made := magpieMadeReasoning(im)
+	if streamed != nil && im["type"] == "reasoning" && (streamed.sawRaw || made != nil) {
+		if summary := streamed.summary(); summary != nil {
+			if made == nil {
+				made = map[string]any{"type": "reasoning", "id": im["id"], "status": "completed"}
+			}
+			made["summary"] = summary
+		}
+	}
 	if made == nil {
 		return false
+	}
+	if t.sse {
+		if status, ok := im["status"].(string); ok && status != "" {
+			made["status"] = status
+		}
 	}
 	for k := range im {
 		delete(im, k)
