@@ -158,6 +158,18 @@ on both sides keeps the newer version while retaining the replaced copy.
 A conditional write refused because another computer committed in between
 is retried through this same merge.
 
+The vendor's fetched model list is a local cache. When sync, Restore or
+Undo applies a new or changed custom Chat or Responses provider set to
+**Vendor's list**, magpie can fill a missing cache from its standard model
+list (#6646). The provider needs one active key carried in the providers
+part and one API base. The request uses that key at the base's origin, and
+private destinations require this computer's `FetchPrivate` permission.
+Providers with preset or sign-in authentication, custom transports or
+headers, disabled lists, and manual-only schedules use their existing list
+paths. The best-effort fetch runs after both sync locks are released, with
+four seconds per provider and twelve seconds total. A preview or an
+unchanged sync makes no such request (`TestRestoredVendorLists`).
+
 A computer can follow the server instead (`Config.FollowServer`, set only
 by `SetFollowServer`: Settings → Sync → This computer → Follows the
 server, `/api/davsync/follow-server`, or `magpie <webdav|s3|github>

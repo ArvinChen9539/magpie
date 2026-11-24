@@ -788,6 +788,8 @@ func syncNow(ctx context.Context, force bool, expect string) error {
 	if _, ok := Load(); !ok { // off: no lock taken, so none made
 		return nil
 	}
+	lists := restoredLists{}
+	defer lists.fetch(ctx)
 	// a sync has no time to end in (see stallAfter), a wait for another's
 	// does
 	lctx, lcancel := context.WithTimeout(ctx, wait)
@@ -818,9 +820,9 @@ func syncNow(ctx context.Context, force bool, expect string) error {
 			return ErrPlanChanged
 		}
 	}
-	err = syncOnce(ctx, c, &st, nil)
+	err = syncOnce(ctx, c, &st, nil, lists)
 	if errors.Is(err, errChanged) { // another computer got in between: again, over its version
-		err = syncOnce(ctx, c, &st, nil)
+		err = syncOnce(ctx, c, &st, nil, lists)
 	}
 	st.Error, st.File = "", nil
 	var nb *notBackup
@@ -1376,7 +1378,7 @@ func keepUnseenGatewayKeys(remote *backup.Bundle, local backup.Bundle) {
 // syncOnce syncs once. With pv, it is a preview: the server's file is
 // read whole, what the sync would do is told in pv, and nothing is changed
 // here or on the server.
-func syncOnce(ctx context.Context, c Config, st *state, pv *Plan) error {
+func syncOnce(ctx context.Context, c Config, st *state, pv *Plan, lists restoredLists) error {
 	d, err := newRemote(c)
 	if err != nil {
 		return err
@@ -1711,7 +1713,7 @@ func syncOnce(ctx context.Context, c Config, st *state, pv *Plan) error {
 			}
 			continue
 		}
-		if err := bring(remote, p); err != nil {
+		if err := lists.bring(remote, p); err != nil {
 			return fmt.Errorf("bringing in the %s: %w", p, err)
 		}
 	}

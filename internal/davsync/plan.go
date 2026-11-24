@@ -135,7 +135,7 @@ func preview(ctx context.Context, c Config, st state) (Plan, error) {
 	st.Local, st.Remote = maps.Clone(st.Local), maps.Clone(st.Remote)
 	st.Own, st.Brought, st.Replaced = maps.Clone(st.Own), maps.Clone(st.Brought), maps.Clone(st.Replaced)
 	var p Plan
-	if err := syncOnce(ctx, c, &st, &p); err != nil {
+	if err := syncOnce(ctx, c, &st, &p, nil); err != nil {
 		return Plan{}, err
 	}
 	p.Follow = c.FollowServer
@@ -396,6 +396,7 @@ func diffItems(a, b map[string]item) []Item {
 // unless force, and the error says which.
 func UndoSync(force bool) ([]string, error) {
 	var back []string
+	lists := restoredLists{}
 	err := locked(func() error {
 		c, ok := Load()
 		if !ok {
@@ -442,7 +443,7 @@ func UndoSync(force bool) ([]string, error) {
 				if _, err := bringAgents(kept.Agents, ownNow); err != nil {
 					return fmt.Errorf("bringing back the %s: %w", p, err)
 				}
-			} else if err := bring(kept, p); err != nil {
+			} else if err := lists.bring(kept, p); err != nil {
 				return fmt.Errorf("bringing back the %s: %w", p, err)
 			}
 			back = append(back, p)
@@ -463,6 +464,7 @@ func UndoSync(force bool) ([]string, error) {
 		saveState(st)
 		return nil
 	})
+	lists.fetch(context.Background())
 	return back, err
 }
 

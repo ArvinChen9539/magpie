@@ -75,6 +75,7 @@ func SetAuto(minutes int) error {
 // with the API keys, and Undo brings it back. It is the parts brought in.
 func Restore(ctx context.Context) ([]string, error) {
 	var brought []string
+	lists := restoredLists{}
 	err := locked(func() error {
 		c, ok := Load()
 		if !ok {
@@ -131,7 +132,7 @@ func Restore(ctx context.Context) ([]string, error) {
 					}
 					continue
 				}
-				if err := bring(remote, p); err != nil {
+				if err := lists.bring(remote, p); err != nil {
 					return fmt.Errorf("bringing in the %s: %w", p, err)
 				}
 			}
@@ -164,6 +165,7 @@ func Restore(ctx context.Context) ([]string, error) {
 		saveState(st)
 		return nil
 	})
+	lists.fetch(ctx)
 	return brought, err
 }
 
@@ -255,6 +257,7 @@ func Upload(ctx context.Context) error {
 // it to the server, as any change made here.
 func Undo() ([]string, error) {
 	var back []string
+	lists := restoredLists{}
 	err := locked(func() error {
 		c, ok := Load()
 		if !ok {
@@ -281,7 +284,7 @@ func Undo() ([]string, error) {
 			if L[p] == K[p] || !c.syncs(p) || (p == "library" && kept.Library == nil) {
 				continue
 			}
-			if err := bring(kept, p); err != nil {
+			if err := lists.bring(kept, p); err != nil {
 				return fmt.Errorf("bringing back the %s: %w", p, err)
 			}
 			back = append(back, p)
@@ -290,6 +293,7 @@ func Undo() ([]string, error) {
 		saveState(st)
 		return nil
 	})
+	lists.fetch(context.Background())
 	return back, err
 }
 
