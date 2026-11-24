@@ -1089,6 +1089,16 @@ its result, on the session viewer, search and the Markdown export
 are counted into the session file's with the `-wal`'s, so a step it adds
 reads the session again. A conversation with no transcript is
 `ErrNoTranscript`, as before.
+
+For Antigravity desktop session calls recorded as
+`gemini-4-hydrogen-tiered-high`, Usage and its request export fall back to
+Google's `gemini-4-hydrogen` catalog price when the recorded ID has no
+price (#7195). The fallback uses the catalog's token rates and context
+tiers. An explicit or exact price takes precedence, and Usage and exports
+retain the recorded ID. See `basePriceIn` in
+[`ledger.go`](../../internal/usage/ledger.go) and
+`TestAntigravityTieredHydrogenUsagePrice`.
+
 Verification: `TestAntigravityInsidersSessions` covers Insiders alone,
 both stores with the same UUID, per-model tokens, call ids, summary refresh
 and turning the existing reading choice off, using #2190's real step bytes.

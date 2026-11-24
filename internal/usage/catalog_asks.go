@@ -218,7 +218,11 @@ func (a priceAsk) ask() string {
 	if a.Unknown {
 		u = "1"
 	}
-	return strings.Join([]string{"p", a.ID, a.Model, a.Served, a.SessionProvider, a.Effort, a.Key, u, boolAnswer(a.Agy)}, askSep)
+	local := boolAnswer(a.LocalAgent == "agy")
+	if a.LocalAgent == "antigravity" {
+		local = a.LocalAgent
+	}
+	return strings.Join([]string{"p", a.ID, a.Model, a.Served, a.SessionProvider, a.Effort, a.Key, u, local}, askSep)
 }
 
 func listedAsk(prov, model, served string) string {
@@ -247,7 +251,11 @@ func answerAsk(s settings.Settings, wires map[string]string, q string) (string, 
 	f := strings.Split(q, askSep)
 	switch {
 	case f[0] == "p" && len(f) == 9:
-		a := priceAsk{ID: f[1], Model: f[2], Served: f[3], SessionProvider: f[4], Effort: f[5], Key: f[6], Unknown: f[7] == "1", Agy: f[8] == "1"}
+		localAgent := f[8]
+		if localAgent == "1" {
+			localAgent = "agy"
+		}
+		a := priceAsk{ID: f[1], Model: f[2], Served: f[3], SessionProvider: f[4], Effort: f[5], Key: f[6], Unknown: f[7] == "1", LocalAgent: localAgent}
 		pr, ws := basePriceIn(s, wires, a)
 		return priceAnswer(pr, ws), true
 	case f[0] == "l" && len(f) == 4:

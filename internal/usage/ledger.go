@@ -615,12 +615,15 @@ func Pricer() func(Record) *catalog.Price {
 		// its calls apart from the provider's other keys
 		key := r.ProviderKeyID
 		tier := r.billedTier()
-		agy := r.Provider == UnknownProvider && agyLocal(r.Agent)
-		k := [8]string{id, r.Model, served, r.SessionProvider, r.Effort, key, r.tierKey(tier, served), strconv.FormatBool(agy)}
+		localAgent := ""
+		if r.Provider == UnknownProvider && agyLocal(r.Agent) {
+			localAgent = r.Agent
+		}
+		k := [8]string{id, r.Model, served, r.SessionProvider, r.Effort, key, r.tierKey(tier, served), localAgent}
 		if c, ok := prices[k]; ok {
 			return atWindow(c.price, c.windows, r.Time)
 		}
-		a := priceAsk{ID: id, Model: r.Model, Served: served, SessionProvider: r.SessionProvider, Effort: r.Effort, Key: key, Unknown: r.Provider == UnknownProvider, Agy: agy}
+		a := priceAsk{ID: id, Model: r.Model, Served: served, SessionProvider: r.SessionProvider, Effort: r.Effort, Key: key, Unknown: r.Provider == UnknownProvider, LocalAgent: localAgent}
 		pr, ws := basePriceIn(s, wires, a)
 		noteAsk(a.ask(), priceAnswer(pr, ws))
 		if pr == nil {
@@ -703,10 +706,7 @@ func (r Record) billedTier() string {
 type priceAsk struct {
 	ID, Model, Served, SessionProvider, Effort, Key string
 	Unknown                                         bool
-	// Agy is a call of the agy CLI's or the Antigravity app's own session
-	// log, which Antigravity counts Gemini 4 Carbon and Argon at their
-	// original price for (provider.AgyPriced)
-	Agy bool
+	LocalAgent                                      string
 }
 
 // basePriceIn is a's price before its time's rate window, and the
@@ -768,7 +768,12 @@ func basePriceIn(s settings.Settings, wires map[string]string, a priceAsk) (*cat
 			ws = nil
 		}
 	}
-	if pr != nil && a.Agy {
+	if pr == nil && a.LocalAgent == "antigravity" && a.Model == "gemini-4-hydrogen-tiered-high" {
+		if v, ok := catalog.PriceOf("google", "gemini-4-hydrogen"); ok {
+			return &v, nil
+		}
+	}
+	if pr != nil && agyLocal(a.LocalAgent) {
 		v := provider.AgyPriced(a.Model, *pr)
 		pr = &v
 	}
