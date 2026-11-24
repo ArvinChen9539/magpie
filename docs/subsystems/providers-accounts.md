@@ -297,6 +297,10 @@ A signed-in account's model list exists only at its vendor (the ChatGPT backend'
 
 ## Runtime path
 
+The balance trend keeps the recorded points and fit when the latest
+balance is zero or negative. It gives a projected exhaustion time only
+while the latest balance is positive.
+
 1. **Add.** The Providers page adds a key provider through `Add` or `Save`, or an account through `StartSignIn`. An agent signed in on its own is found by `Accounts` with no step from the user.
 2. **Resolve.** The gateway calls `provider.Resolve` or `GroupFor` with the model name, then plans candidates over the provider's keys or accounts.
 3. **Sign.** For each try, `Sign` gives the request its auth. A token about to expire is refreshed first, and the rotated tokens go back to their one holder: the agent's store, or `logins.json` for an account standing behind it.

@@ -310,7 +310,7 @@ func balanceTrend(pts []BalancePoint, now time.Time) *BalanceTrend {
 	xNow := now.Sub(t0).Hours() / 24
 	tr.FitFrom, tr.FitStart, tr.FitNow = &from, round4(icept), round4(icept+slope*xNow)
 	tr.PerDay = round4(-slope)
-	if slope < 0 {
+	if slope < 0 && shown[len(shown)-1].Amount > 0 {
 		days := -icept / slope // where the line meets zero
 		out := t0.Add(time.Duration(days * 24 * float64(time.Hour)))
 		if out.Before(now) {

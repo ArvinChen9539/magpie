@@ -88,6 +88,13 @@ func TestBalanceTrendRunsOut(t *testing.T) {
 	if math.Abs(tr.FitNow-30) > 0.5 || math.Abs(tr.FitStart-50) > 0.5 {
 		t.Fatalf("fit %v → %v", tr.FitStart, tr.FitNow)
 	}
+	for _, last := range []float64{0, -1} {
+		exhausted := []BalancePoint{{h(48), 20}, {h(24), 10}, {h(0), last}}
+		trend := balanceTrend(exhausted, now)
+		if trend == nil || len(trend.Points) != len(exhausted) || trend.RunsOut != nil {
+			t.Fatalf("balance %v: want history without a runs-out time, got %+v", last, trend)
+		}
+	}
 
 	flat := []BalancePoint{{h(48), 20}, {h(24), 20}, {h(0), 20}}
 	if tr := balanceTrend(flat, now); tr == nil || tr.RunsOut != nil || tr.PerDay != 0 {

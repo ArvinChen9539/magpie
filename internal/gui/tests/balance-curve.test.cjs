@@ -30,6 +30,9 @@ function fixtures(now) {
     // bills don't add up to it (corddis_114 on Discord): the same curve
     { provider: "raccoon", name: "Raccoon", icon: "raccoon", user: "138****0000", plan: "Free", windows: [], balance: "5900 credits", readAt: iso(now),
       balanceTrend: { points: [[48, 6122], [24, 6000], [0, 5900]].map(([h, v]) => ({ at: iso(now - h * H), amount: v })) } },
+    { provider: "exhausted", name: "Exhausted", windows: [], balance: "¥-1.00", readAt: iso(now),
+      balanceTrend: { points: [[48, 20], [24, 10], [0, -1]].map(([h, v]) => ({ at: iso(now - h * H), amount: v })),
+        fitFrom: iso(now - 48 * H), fitStart: 20, fitNow: -1, perDay: 10.5 } },
   ];
 }
 
@@ -106,6 +109,10 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
         const wallet = page.locator(".subscription-card", { hasText: "Raccoon" }).locator(".balance-curve");
         assert.equal(await wallet.count(), 1, "an account's balance alone has its curve too");
         assert.equal(await wallet.locator("path.qc-line").count(), 1);
+        const exhausted = page.locator(".subscription-card", { hasText: "Exhausted" }).locator(".balance-curve");
+        assert.equal(await exhausted.locator("path.qc-line").count(), 1);
+        assert.equal(await exhausted.locator(".qc-range").textContent(), "");
+        assert.equal(await exhausted.locator("line.qc-now").count(), 0);
         assert.equal(await page.locator(".quota-curve select, .quota-curve button").count(), 0, "no control on the card");
         const left = await curve.evaluate((e) => [...e.querySelectorAll("*")].filter((x) => parseFloat(getComputedStyle(x).borderLeftWidth) > 0).length);
         assert.equal(left, 0, "no left borders");
