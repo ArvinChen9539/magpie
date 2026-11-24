@@ -297,6 +297,11 @@ A signed-in account's model list exists only at its vendor (the ChatGPT backend'
 
 ## Runtime path
 
+The header's model refresh (`POST /api/sync`) and `magpie sync` report
+which enabled providers' lists could not be refreshed. Lists read
+successfully still update. A failed read leaves that provider's last
+list available.
+
 1. **Add.** The Providers page adds a key provider through `Add` or `Save`, or an account through `StartSignIn`. An agent signed in on its own is found by `Accounts` with no step from the user.
 2. **Resolve.** The gateway calls `provider.Resolve` or `GroupFor` with the model name, then plans candidates over the provider's keys or accounts.
 3. **Sign.** For each try, `Sign` gives the request its auth. A token about to expire is refreshed first, and the rotated tokens go back to their one holder: the agent's store, or `logins.json` for an account standing behind it.

@@ -94,7 +94,32 @@ func TestRefreshListsAsksNoProviderSwitchedOff(t *testing.T) {
 	if off.Load() != 0 {
 		t.Fatalf("the provider switched off was asked %d times", off.Load())
 	}
-	if on.Load() == 0 || !slices.Equal(got, []Listed{{"here", 3}}) {
+	if on.Load() == 0 || !slices.Equal(got, []Listed{{ID: "here", Models: 3}}) {
 		t.Fatalf("RefreshLists = %v, the one on asked %d times", got, on.Load())
+	}
+}
+
+func TestRefreshListsReportsFailedProviders(t *testing.T) {
+	prefillHome(t)
+	healthy := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		_, _ = rw.Write([]byte(groupAll))
+	}))
+	t.Cleanup(healthy.Close)
+	unavailable := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		http.Error(rw, "unavailable", http.StatusServiceUnavailable)
+	}))
+	t.Cleanup(unavailable.Close)
+	for _, vendor := range []Provider{
+		{ID: "healthy", Name: "Healthy", Chat: healthy.URL + "/v1", Key: "sk-healthy"},
+		{ID: "unavailable", Name: "Unavailable", Chat: unavailable.URL + "/v1", Key: "sk-unavailable"},
+	} {
+		if err := Save(vendor); err != nil {
+			t.Fatal(err)
+		}
+	}
+	results := RefreshLists(context.Background())
+	if !slices.Contains(results, Listed{ID: "healthy", Models: 3}) ||
+		!slices.Contains(results, Listed{ID: "unavailable", Failed: true}) {
+		t.Fatalf("refresh should report success and failure, got %+v", results)
 	}
 }

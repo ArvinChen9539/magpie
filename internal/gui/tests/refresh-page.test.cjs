@@ -21,6 +21,8 @@ const words = {
     usage: "Read the usage again now",
     allowances: "Read the allowances again now",
     models: "Refresh model lists (models.dev and every vendor)",
+    refreshed: "Model lists refreshed",
+    failed: "Could not refresh model lists for offline, slow",
     nav: { usage: "Usage", providers: "Providers" },
   },
   zh: {
@@ -28,6 +30,8 @@ const words = {
     usage: "立即重新读取用量",
     allowances: "立即重新读取额度",
     models: "刷新模型列表（models.dev 与各供应商）",
+    refreshed: "模型列表已刷新",
+    failed: "无法刷新以下供应商的模型列表：offline, slow",
     nav: { usage: "用量", providers: "供应商" },
   },
 };
@@ -47,7 +51,8 @@ function server(lang, ctl) {
     ctl.calls.push(req.method() + " " + url.pathname + url.search);
     if (url.pathname === "/boot.js") return route.fulfill({ contentType: "text/javascript", body: `window.bootPrefs = {lang:"${lang}",theme:"light",web:false};` });
     if (url.pathname === "/wails/runtime.js") return route.fulfill({ contentType: "text/javascript", body: "export const Window = {};" });
-    if (url.pathname === "/api/state" || url.pathname === "/api/sync") return json(state());
+    if (url.pathname === "/api/state") return json(state());
+    if (url.pathname === "/api/sync") return json({ ...state(), modelRefreshFailed: ctl.modelRefreshFailed });
     if (url.pathname === "/api/agents/rescan") {
       // Claude Code was installed meanwhile
       ctl.agents = [...ctl.agents, agent("claude", "Claude Code")];
@@ -61,7 +66,7 @@ function server(lang, ctl) {
     if (url.pathname === "/api/usage/quotas/history") return json([]);
     if (url.pathname === "/api/usage") return json({ totals: {}, days: [], providers: [], models: [], agents: [] });
     if (url.pathname === "/api/groups") return json({ groups: [], models: [] });
-    if (url.pathname === "/api/providers") return json({ providers: [], gateway: { running: true } });
+    if (url.pathname === "/api/providers") return json({ providers: [], presets: [], excluded: [], gateway: { running: true } });
     if (url.pathname.startsWith("/api/")) return json({});
     const file = path.join(assets, url.pathname === "/" ? "index.html" : url.pathname);
     const contentType = { ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml", ".png": "image/png" }[path.extname(file)];
@@ -123,6 +128,10 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
         assert.equal(await sync.getAttribute("title"), words[lang].models);
         await click(page, sync);
         assert.equal(count(ctl, /^POST \/api\/sync$/), 1);
+        assert.equal(await page.locator("#status").textContent(), words[lang].refreshed);
+        ctl.modelRefreshFailed = ["offline", "slow"];
+        await click(page, sync);
+        assert.equal(await page.locator("#status").textContent(), words[lang].failed);
         assert.equal(count(ctl, /\/api\/agents\/rescan/), 1);
         assert.equal(count(ctl, /\/api\/update\/check/), 0, "no update check");
         assert.deepEqual(errors, []);

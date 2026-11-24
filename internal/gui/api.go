@@ -1718,8 +1718,16 @@ func Handler(w Windows, gw *gateway.Server) http.Handler {
 			fail(rw, err)
 			return
 		}
-		provider.RefreshLists(ctx)
-		writeJSON(rw, state())
+		var failed []string
+		for _, result := range provider.RefreshLists(ctx) {
+			if result.Failed {
+				failed = append(failed, result.ID)
+			}
+		}
+		writeJSON(rw, struct {
+			stateJSON
+			ModelRefreshFailed []string `json:"modelRefreshFailed,omitempty"`
+		}{state(), failed})
 	})
 	providerRoutes(mux, w)
 	importRoutes(mux)

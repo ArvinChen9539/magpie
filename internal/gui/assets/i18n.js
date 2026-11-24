@@ -4238,6 +4238,7 @@ const I18N = {
 
     // sync
     "Model lists refreshed": "模型列表已刷新",
+    "Could not refresh model lists for {providers}": "无法刷新以下供应商的模型列表：{providers}",
     "Sync failed: {e}": "同步失败：{e}",
 
     // settings
@@ -9803,6 +9804,7 @@ const I18N = {
     "What it cost in its plan's credits, as the reply said": "依回覆所述，這次請求消耗的方案積分",
     "{n} cached": "快取 {n}",
     "Model lists refreshed": "模型列表已重新整理",
+    "Could not refresh model lists for {providers}": "無法重新整理以下供應商的模型列表：{providers}",
     "Sync failed: {e}": "同步失敗：{e}",
     "Preferences": "偏好",
     "General": "常規",
@@ -15374,6 +15376,7 @@ const I18N = {
     "What it cost in its plan's credits, as the reply said": "このリクエストが消費したプランのクレジット（応答の申告どおり）",
     "{n} cached": "キャッシュ {n}",
     "Model lists refreshed": "モデル一覧を更新しました",
+    "Could not refresh model lists for {providers}": "次のプロバイダーのモデル一覧を更新できませんでした：{providers}",
     "Sync failed: {e}": "同期に失敗しました：{e}",
     "Preferences": "環境設定",
     "General": "一般",
@@ -20966,6 +20969,7 @@ const I18N = {
     "What it cost in its plan's credits, as the reply said": "Was die Anfrage laut Antwort an Credits des Tarifs gekostet hat",
     "{n} cached": "{n} im Cache",
     "Model lists refreshed": "Modelllisten aktualisiert",
+    "Could not refresh model lists for {providers}": "Modelllisten konnten für folgende Anbieter nicht aktualisiert werden: {providers}",
     "Sync failed: {e}": "Synchronisierung fehlgeschlagen: {e}",
     "Preferences": "Einstellungen",
     "General": "Allgemein",

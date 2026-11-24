@@ -1682,12 +1682,19 @@ func ago(t time.Time) string {
 // refreshLive re-fetches the model list of every ready provider not
 // switched off; `magpie sync` calls it after the catalog download.
 func refreshLive(ctx context.Context) {
-	var names []string
+	var names, failed []string
 	for _, l := range provider.RefreshLists(ctx) {
+		if l.Failed {
+			failed = append(failed, l.ID)
+			continue
+		}
 		names = append(names, fmt.Sprintf("%s (%d)", l.ID, l.Models))
 	}
 	if len(names) > 0 {
 		fmt.Println(green.Render("✓"), "model lists:", strings.Join(names, ", "))
+	}
+	if len(failed) > 0 {
+		fmt.Fprintln(os.Stderr, "could not refresh model lists:", strings.Join(failed, ", "))
 	}
 }
 

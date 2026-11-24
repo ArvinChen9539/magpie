@@ -282,19 +282,19 @@ func (p Provider) liveAll() ([]catalog.Model, bool) {
 	return l.ms, l.ok
 }
 
-// Listed is a provider RefreshLists asked, and how many models it listed.
+// Listed is the outcome of refreshing one provider's model list.
 type Listed struct {
 	ID     string
 	Models int
+	Failed bool
 }
 
 // refreshEach is how long RefreshLists waits for each provider's list.
 var refreshEach = 8 * time.Second
 
 // RefreshLists asks every provider that is ready, and not switched off,
-// for its model list, each for at most refreshEach, and answers those that
-// answered, in order: the Refresh of every list (the GUI's, `magpie
-// sync`). One switched off is asked nothing and keeps the list it had
+// for its model list, each for at most refreshEach, and returns all outcomes
+// in order (the GUI's Refresh, `magpie sync`). One switched off keeps its list
 // (ChangQiu on Discord: Off means no request goes to it).
 func RefreshLists(ctx context.Context) []Listed {
 	var out []Listed
@@ -305,9 +305,7 @@ func RefreshLists(ctx context.Context) []Listed {
 		c, cancel := context.WithTimeout(ctx, refreshEach)
 		ms, err := p.Fetch(c)
 		cancel()
-		if err == nil {
-			out = append(out, Listed{p.ID, len(ms)})
-		}
+		out = append(out, Listed{ID: p.ID, Models: len(ms), Failed: err != nil})
 	}
 	return out
 }

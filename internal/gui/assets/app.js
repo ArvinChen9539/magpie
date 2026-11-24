@@ -23808,48 +23808,18 @@ function syncTitle() {
   b.title = t(b.dataset.enTitle);
   b.setAttribute("aria-label", b.title);
 }
-async function refreshPage(kind) {
-  switch (kind) {
-    case "agents":
-      state = await api("agents/rescan", {});
-      renderAgents();
-      await Promise.all([loadInstalls(), loadCLIs()]);
-      return t("Agents looked for again");
-    case "usage":
-      await magpie.call("usage", "reload");
-      return t("Usage refreshed");
-    case "allowances":
-      await loadQuotas("all");
-      return t("Allowances refreshed");
-    case "requests":
-      await loadPanelUse();
-      return t("Usage refreshed");
-  }
-  state = await api("sync", {});
-  renderAgents();
-  if (providers) await loadProviders();
-  return t("Model lists refreshed");
-}
 syncTitle();
 
-$("#sync").onclick = async () => {
-  const b = $("#sync");
-  if (b.classList.contains("spin")) return;
-  b.classList.add("spin");
-  const kind = refreshKind();
+$("#sync").onclick = async (event) => {
+  const button = event.currentTarget, kind = refreshKind();
+  if (button.classList.contains("spin")) return;
+  button.classList.add("spin");
   try {
-    status(await refreshPage(kind), "ok");
-  } catch (e) {
-    status(kind === "models" ? t("Sync failed: {e}", { e: e.message }) : e.message, "err");
-  } finally {
-    b.blur();
-    // stop at the end of a turn, on the compositor's clock (#16)
-    const spins = b.querySelector("svg").getAnimations({ subtree: true });
-    const stop = () => b.classList.remove("spin");
-    if (spins.length && spins.every((a) => a.effect?.updateTiming)) {
-      for (const a of spins) a.effect.updateTiming({ iterations: (a.effect.getComputedTiming().currentIteration || 0) + 1 });
-      Promise.all(spins.map((a) => a.finished)).then(stop, stop);
-    } else stop();
+    const { runHeaderRefresh } = await import("./headerrefresh.js");
+    await runHeaderRefresh(button, kind);
+  } catch (error) {
+    button.classList.remove("spin");
+    statusErr(error);
   }
 };
 $("#open").onclick = () => api("window/main", {});
