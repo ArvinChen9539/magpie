@@ -94,6 +94,7 @@ func claudeDirAgents(home string) []*Agent {
 		}
 		// the claude row keeps the command, the names and the requests
 		a.Aliases, a.UA, a.Bin = nil, nil, ""
+		a.LastUsed = nil
 		a.detect = func() bool { return claudeDirIsClaude(dir) }
 		out = append(out, a)
 	}
