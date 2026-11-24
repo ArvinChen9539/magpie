@@ -291,9 +291,12 @@ further (`State.Since`), unless a range is picked.
   (letters and digits compared, `bare`) is dropped: on real
   conversations those were the assistant's own instructions said back. A text the user deleted or archived is never proposed
   again (`memory.Dismissed`, `TestDeletedNotProposedAgain`).
-- A failed request stops the run, records the error for the row, and
-  leaves the conversation to be read again next time
-  (`TestFailureAndCap`).
+- A failed request or a reply that cannot be read as a JSON array of
+  proposals stops the run, records the error for the row, and leaves the
+  conversation due for the next scheduled run or Read now. A reply format
+  error names the model and expected format without including the reply.
+  A valid empty array (`[]`) counts as read with no new memories
+  (`TestFailureAndCap`, `TestInvalidReplyLeavesConversationDue`).
 - Routes: `GET /api/memory/distill`, `POST /api/memory/distill`
   `{on, model, effort?, days?}` (switching on, a new model, or a longer
   range reads at once; a bad level or range is a 400,

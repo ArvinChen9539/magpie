@@ -478,6 +478,10 @@ func run(ctx context.Context, st State, model, effort string, complete Complete,
 		}
 		proj := memory.ProjectOf(s.Cwd)
 		reply, err := complete(ctx, model, effort, prompt, request(text, known(proj), proj))
+		var proposals []found
+		if err == nil {
+			proposals, err = parse(reply)
+		}
 		if err != nil {
 			r.left++ // read again next time
 			if ctx.Err() != nil {
@@ -487,7 +491,7 @@ func run(ctx context.Context, st State, model, effort string, complete Complete,
 		}
 		r.Read++
 		r.done[key(s)] = s.Last
-		r.Added += keep(parse(reply), s, proj, said(tr))
+		r.Added += keep(proposals, s, proj, said(tr))
 	}
 	return r, nil
 }
@@ -622,18 +626,28 @@ type found struct {
 	Quote string `json:"quote"`
 }
 
-// parse reads the reply's JSON array, in a code fence or after words; a
-// reply without one is nothing found.
-func parse(reply string) []found {
-	i, j := strings.Index(reply, "["), strings.LastIndex(reply, "]")
-	if i < 0 || j < i {
-		return nil
+var errInvalidReply = errors.New("invalid memory extraction reply: expected a JSON array of proposals")
+
+func parse(reply string) ([]found, error) {
+	start := strings.IndexAny(reply, `[{"`)
+	for start >= 0 && reply[start] == '"' {
+		decoder := json.NewDecoder(strings.NewReader(reply[start:]))
+		var phrase string
+		if decoder.Decode(&phrase) != nil || strings.Contains(phrase, "[") {
+			return nil, errInvalidReply
+		}
+		reply = reply[start+int(decoder.InputOffset()):]
+		start = strings.IndexAny(reply, `[{"`)
+	}
+	end := strings.LastIndexByte(reply, ']')
+	if start < 0 || end < start || reply[start] != '[' {
+		return nil, errInvalidReply
 	}
 	var out []found
-	if json.Unmarshal([]byte(reply[i:j+1]), &out) != nil {
-		return nil
+	if json.Unmarshal([]byte(reply[start:end+1]), &out) != nil {
+		return nil, errInvalidReply
 	}
-	return out
+	return out, nil
 }
 
 // keep saves what was found as candidates, each from s, and counts the

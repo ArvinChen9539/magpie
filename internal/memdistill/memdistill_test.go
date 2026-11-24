@@ -120,7 +120,7 @@ func TestReadsQuietSessionsOnce(t *testing.T) {
 	sb.session("own", time.Hour, "own: one", "two").Agent = Agent
 	sb.session("unread", time.Hour).Transcript = false
 	sb.reply = func(user string) (string, error) {
-		return "Here they are:\n```json\n" + `[
+		return "Here are the \"preferences\":\n```json\n" + `[
 			{"text":"Use pnpm, never npm","kind":"rule","scope":"project","why":"said so","quote":"never use npm here, pnpm only"},
 			{"text":"Deploys go out with make ship","kind":"nonsense","scope":"project","quote":"We deploy with  Make ship."},
 			{"text":"Prefers short answers","kind":"preference","scope":"global","quote":"pnpm only"},
@@ -265,6 +265,63 @@ func TestFailureAndCap(t *testing.T) {
 	}
 	if st, _ := Load(); !strings.Contains(st.Error, "pick one") {
 		t.Fatalf("%+v", st)
+	}
+}
+
+func TestInvalidReplyLeavesConversationDue(t *testing.T) {
+	for _, test := range []struct{ name, reply string }{
+		{"chat", "记住了，以后我会用中文回答你。"},
+		{"empty", ""},
+		{"null", "null"},
+		{"object", `{"memories":[]}`},
+		{"fenced object", "```json\n" + `{"memories":[]}` + "\n```"},
+		{"string", `"No proposals: []"`},
+		{"fenced string", "```json\n" + `"[]"` + "\n```"},
+		{"truncated", `[{"text":"not finished"}`},
+		{"malformed", `[{"text":"PRIVATE_TRANSCRIPT_SAMPLE",}]`},
+		{"wrong item type", `["PRIVATE_TRANSCRIPT_SAMPLE"]`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			sb := newSandbox(t)
+			on(t, "")
+			sb.session("first", time.Hour, "Prefers tabs", "Use tabs everywhere")
+			sb.session("retry", 2*time.Hour, "我长期偏好用中文交流。", "以后所有回答都用中文。")
+			sb.session("later", 3*time.Hour, "later", "more")
+			sb.reply = func(string) (string, error) {
+				if len(sb.asked) == 1 {
+					return `[{"text":"Prefers tabs","quote":"Use tabs everywhere"}]`, nil
+				}
+				return test.reply, nil
+			}
+
+			res, err := Run(context.Background(), "a/m", sb.complete)
+			if err == nil || !strings.Contains(err.Error(), "a/m:") || !strings.Contains(err.Error(), "expected a JSON array") || strings.Contains(err.Error(), "PRIVATE_TRANSCRIPT_SAMPLE") {
+				t.Errorf("invalid reply error = %v", err)
+			}
+			if res != (Result{Read: 1, Added: 1}) || len(sb.asked) != 2 {
+				t.Errorf("invalid reply processed: %+v, requests %q", res, sb.asked)
+			}
+			st, loadErr := Load()
+			if loadErr != nil {
+				t.Fatal(loadErr)
+			}
+			if err == nil || st.Error != err.Error() {
+				t.Errorf("saved error = %q, run error = %v", st.Error, err)
+			}
+			if st.Read != 1 || st.Added != 1 || st.Left != 2 || len(st.Done) != 1 || !st.Done["codex/first"].Equal(sb.list[0].Last) {
+				t.Errorf("after invalid reply: %+v, %v", st, loadErr)
+			}
+
+			sb.reply, sb.asked = nil, nil
+			res, err = ReadAll(context.Background(), "a/m", sb.complete)
+			if err != nil || res != (Result{Read: 2}) || !slices.Equal(sb.asked, []string{"a/m User: 我长期偏好用中文交流。", "a/m User: later"}) {
+				t.Fatalf("retry with []: %+v, %v, requests %q", res, err, sb.asked)
+			}
+			st, err = Load()
+			if err != nil || st.Error != "" || st.Read != 2 || st.Added != 0 || st.Left != 0 || len(st.Done) != 3 || len(memories(t)) != 1 {
+				t.Fatalf("after retry: %+v, %v", st, err)
+			}
+		})
 	}
 }
 
