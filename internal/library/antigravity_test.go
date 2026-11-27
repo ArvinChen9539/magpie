@@ -39,9 +39,6 @@ func TestAntigravityTarget(t *testing.T) {
 	}
 }
 
-// Servers are written as agy's own `mcp add` writes them — a remote one's
-// serverUrl, never url or httpUrl — into the empty file Antigravity leaves,
-// keeping what the user added to an entry and their own servers.
 func TestAntigravityMCP(t *testing.T) {
 	_, cfg := antigravity(t)
 	p := filepath.Join(cfg, "mcp_config.json")
@@ -61,7 +58,7 @@ func TestAntigravityMCP(t *testing.T) {
 		t.Fatalf("%v:\n%s", err, read(t, p))
 	}
 	w := f.MCPServers["web"]
-	if w["serverUrl"] != "https://example.com/mcp" || w["url"] != nil || w["httpUrl"] != nil || w["type"] != nil {
+	if w["url"] != "https://example.com/mcp" || w["serverUrl"] != nil || w["httpUrl"] != nil || w["type"] != nil {
 		t.Errorf("web: %v", w)
 	}
 	if h, _ := w["headers"].(map[string]any); h["Authorization"] != "Bearer x" {
@@ -70,7 +67,7 @@ func TestAntigravityMCP(t *testing.T) {
 	if o := f.MCPServers["old"]; o["serverUrl"] != "https://example.com/sse" || o["type"] != "sse" {
 		t.Errorf("sse: %v", o)
 	}
-	if fs := f.MCPServers["fs"]; fs["command"] != "npx" || fs["serverUrl"] != nil {
+	if fs := f.MCPServers["fs"]; fs["command"] != "npx" || fs["url"] != nil || fs["serverUrl"] != nil {
 		t.Errorf("fs: %v", fs)
 	}
 	got, err := targetByID("agy").MCP.read()
@@ -85,10 +82,21 @@ func TestAntigravityMCP(t *testing.T) {
 
 	// agy's own rewrite (`agy mcp disable`) adds "disabled" and drops an
 	// empty args or env; the server is still the library's, as it was
-	write(t, p, `{"mcpServers": {"mine": {"url": "https://mine.example/mcp"},
+	write(t, p, `{"mcpServers": {"mine": {"serverUrl": "https://mine.example/mcp"},
 		"web": {"disabled": true, "headers": {"Authorization": "Bearer x"}, "serverUrl": "https://example.com/mcp"},
 		"fs": {"args": ["-y", "@mcp/fs"], "command": "npx", "env": {"K": "V"}},
 		"old": {"serverUrl": "https://example.com/sse", "type": "sse"}}}`)
+	ok(t)(Sync())
+	entries, err := targetByID("agy").MCP.entries()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w := entries["web"]; w["disabled"] != true || w["url"] != web.URL || w["serverUrl"] != nil {
+		t.Errorf("managed legacy HTTP after sync: %v", w)
+	}
+	if entries["mine"]["serverUrl"] != "https://mine.example/mcp" || entries["old"]["serverUrl"] != sse.URL {
+		t.Errorf("unmanaged HTTP or SSE rewritten: %v", entries)
+	}
 	before := read(t, p)
 	ok(t)(Sync())
 	if read(t, p) != before {
@@ -96,7 +104,7 @@ func TestAntigravityMCP(t *testing.T) {
 	}
 	ok(t)(SaveServer("web", Server{Name: "web", Transport: "http", URL: "https://example.com/v2", Agents: agents}))
 	json.Unmarshal([]byte(read(t, p)), &f)
-	if w := f.MCPServers["web"]; w["disabled"] != true || w["serverUrl"] != "https://example.com/v2" {
+	if w := f.MCPServers["web"]; w["disabled"] != true || w["url"] != "https://example.com/v2" || w["serverUrl"] != nil {
 		t.Errorf("web after edit: %v", w)
 	}
 

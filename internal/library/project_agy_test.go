@@ -292,7 +292,7 @@ func TestAgyProjectServers(t *testing.T) {
 	if fs, _ := s["fs"].(map[string]any); fs["command"] != "npx" || fs["type"] != nil {
 		t.Errorf("fs: %v", fs)
 	}
-	if d, _ := s["docs"].(map[string]any); d["serverUrl"] != "https://docs.example/mcp" {
+	if d, _ := s["docs"].(map[string]any); d["url"] != "https://docs.example/mcp" || d["serverUrl"] != nil {
 		t.Errorf("docs: %v", d)
 	}
 	if s["linear"] == nil || !strings.Contains(read(t, f), "// the team's own") {

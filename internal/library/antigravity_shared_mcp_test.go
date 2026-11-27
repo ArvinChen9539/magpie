@@ -41,6 +41,13 @@ func TestAntigravitySharedMCPFile(t *testing.T) {
 		if got := names(); len(got) != 1 || !got[HubEntry] {
 			t.Fatalf("round %d, router on: %v\n%s", round, got, read(t, p))
 		}
+		entries, err := targetByID("agy").MCP.entries()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if hub := entries[HubEntry]; str(hub, "url") == "" || hub["serverUrl"] != nil {
+			t.Fatalf("round %d, router HTTP entry: %v", round, hub)
+		}
 		ok(t)(SetMCPHub(false))
 		if got := names(); len(got) != 2 || !got["fs"] || !got["web"] {
 			t.Fatalf("round %d, router off: %v\n%s", round, got, read(t, p))

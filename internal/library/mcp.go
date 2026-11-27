@@ -327,8 +327,7 @@ const (
 	fmtDsh
 	// fmtPiNative is the mcp.json Pi 0.99 reads itself (pimcp.go)
 	fmtPiNative
-	// fmtAntigravity is Antigravity's mcp_config.json: a remote server is
-	// its serverUrl, whatever it speaks
+	// fmtAntigravity is Antigravity's mcp_config.json: HTTP uses url, SSE serverUrl.
 	fmtAntigravity
 	// fmtHermes is Hermes Agent's mcp_servers in its config.yaml: a url is
 	// streamable HTTP unless transport says sse, a command stdio
@@ -613,12 +612,15 @@ func wroteStartup(s *Server, v float64) *Server {
 // magpie-image was given a longer one.
 const gooseOldTimeout = 300
 
-// behind says whether an entry magpie wrote before lacks the timeout it
-// gives s now: Codex's tool_timeout_sec is missing, or Goose's timeout is
-// still the gooseOldTimeout every server had, or Codex's startup timeout
+// behind says whether an entry magpie wrote before uses a superseded format
+// or lacks the timeout it gives s now: Codex's tool_timeout_sec is
+// missing, Goose still has the gooseOldTimeout, or Codex's startup timeout
 // isn't the one s has (startupBehind). A value the user chose is none of
 // these, so it is left as it is.
 func (f *mcpFile) behind(s *Server, old map[string]any) bool {
+	if f.Format == fmtAntigravity && s.Transport == "http" && str(old, "serverUrl") != "" {
+		return true
+	}
 	if f.Format == fmtCodex && old != nil && startupBehind(s, old) {
 		return true
 	}
@@ -945,8 +947,10 @@ func (f *mcpFile) encode(s *Server) ordered {
 		if s.Remote() {
 			if s.Transport == "sse" {
 				add("type", "sse")
+				add("serverUrl", s.URL)
+			} else {
+				add("url", s.URL)
 			}
-			add("serverUrl", s.URL)
 			optional("headers", s.Headers)
 		} else {
 			add("command", s.Command)
@@ -1522,7 +1526,6 @@ var owned = map[mcpFormat][]string{
 	// rewrites to transport
 	fmtOpenClaw: {"transport", "type", "url", "headers", "command", "args", "env"},
 
-	// a url agy read in place of serverUrl goes when magpie writes one
 	fmtAntigravity: {"type", "serverUrl", "url", "headers", "command", "args", "env"},
 }
 

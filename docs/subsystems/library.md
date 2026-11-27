@@ -64,6 +64,8 @@ Pi's extensions and packages.
 
 ## Constraints and failure behavior
 
+- Antigravity's managed Streamable HTTP MCP entries use `url` in both the user and project config, including the MCP Hub. The ACP client drops HTTP entries with only `serverUrl` (#7926). The library still reads legacy entries and rewrites managed HTTP entries on sync. SSE keeps its `serverUrl` format, and unmanaged entries are left alone.
+
 - magpie takes away only what `Applied` or its mark says it wrote. A folder of the user's with a skill's name is never touched. The user's own fields in an MCP entry are kept.
 - A library with no instructions to give (no agent ticked, or no shared text) has lost them, as far as an automatic write knows. `Sync` (each start, and beside a change) then leaves every agent's part where it is and logs a line per agent, naming a record whose last write hashes empty; only the page's own write (`changeInstructions`) takes parts back. An automatic write never removes a whole instructions file: it empties one in place. A set's or an agent's extra text that is there but can't be read is a `Problem`, never an empty text (#5709: an emptied Library wiped nine agents' AGENTS.md at start, four deleted whole; `TestEmptyLibraryApplyLeavesAgentsFilesAlone`, `TestUntickedLibraryApplyLeavesFilesAlone`, `TestUnreadableTextLeavesFilesAlone`).
 - An edit never silently loses. When an agent's copy of a skill and the library both changed, the newest edit wins, and the losing one is kept with the backups.
