@@ -22,6 +22,15 @@ func cindyHere(t *testing.T, h string) string {
 	return d
 }
 
+func removePiCLI(t *testing.T, home string) {
+	t.Helper()
+	for _, name := range []string{"pi", "pi.exe"} {
+		if err := os.Remove(filepath.Join(home, "bin", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 // T_t__biu on X (#7854): shared instructions had no Cindy. Cindy's Pi,
 // its default runtime, puts Pi's own user-wide file in every chat's system
 // prompt (readPiGlobalContext, resolvePiGlobalContextHome: ~/.pi/agent, or
@@ -32,9 +41,7 @@ func cindyHere(t *testing.T, h string) string {
 func TestCindyInstructions(t *testing.T) {
 	h := sandbox(t)
 	// Cindy with no Pi installed: the file is Cindy's alone
-	if err := os.Remove(filepath.Join(h, "bin", "pi")); err != nil {
-		t.Fatal(err)
-	}
+	removePiCLI(t, h)
 	dir := cindyHere(t, h)
 	pi := filepath.Join(h, ".pi", "agent")
 	if tg := targetByID("pi"); tg != nil {

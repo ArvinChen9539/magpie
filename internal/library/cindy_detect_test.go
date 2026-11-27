@@ -16,8 +16,7 @@ import (
 func TestCindyInstructionsListNoPi(t *testing.T) {
 	h := sandbox(t)
 	os.RemoveAll(filepath.Join(h, ".pi"))
-	os.Remove(filepath.Join(h, "bin", "pi"))
-	os.Remove(filepath.Join(h, "bin", "pi.exe"))
+	removePiCLI(t, h)
 	cindyHere(t, h)
 	shared := "Use tabs."
 	ok(t)(SaveInstructions(InstructionsChange{Shared: &shared, Agents: []string{"cindy"}}))
