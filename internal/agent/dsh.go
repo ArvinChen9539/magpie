@@ -3162,6 +3162,10 @@ func (r *dshRounds) once() string {
 		r.done = false
 		return ""
 	}
+	if (&Agent{ID: list}).Disconnected() {
+		r.done = false
+		return ""
+	}
 	// one catalog for the whole round: outside a Hold, each PublicRef,
 	// RenamedRef and Exposed the round asks built every provider's models
 	// again, 158 MB of what a real account's magpie allocated in its first

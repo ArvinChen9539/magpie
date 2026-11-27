@@ -3,6 +3,7 @@ package agent
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,77 @@ import (
 	"github.com/yetone/magpie/internal/provider"
 	"github.com/yetone/magpie/internal/settings"
 )
+
+func TestDshRoundHonorsExplicitDisconnect(t *testing.T) {
+	for _, disconnectID := range []string{"dsh", dsbotID} {
+		t.Run(disconnectID, func(t *testing.T) {
+			home, dshDir, _, _ := dsbotSandbox(t)
+			botDir := filepath.Join(home, "bot-harness")
+			t.Setenv("DS_BOT_HOME", botDir)
+			agents := []*Agent{dsh(home), dsbot(home)}
+			profiles := []string{filepath.Join(dshDir, "profiles", "web", "cordis.patch.yml"), filepath.Join(botDir, "profiles", "ds-bot", "cordis.patch.yml")}
+			const stale = dshMineRow + "- id: agent-default-model\n  config:\n    provider: magpie\n    model: deepseek/flash\n"
+			writeProfile := func(file, contents string) {
+				t.Helper()
+				if err := os.MkdirAll(filepath.Dir(file), 0o755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(file, []byte(contents), 0o644); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rounds := dshHomesRounds()
+			runRound := func() {
+				t.Helper()
+				if trouble := dshRoundsOnce(rounds); trouble != "" {
+					t.Fatal(trouble)
+				}
+			}
+			var disconnectedProfile string
+			for index, candidate := range agents {
+				writeProfile(profiles[index], dshMineRow)
+				if err := candidate.Pick("model", "magpie/deepseek/flash"); err != nil {
+					t.Fatal(err)
+				}
+				if candidate.ID == disconnectID {
+					if err := candidate.Disconnect(); err != nil {
+						t.Fatal(err)
+					}
+					if !candidate.Disconnected() {
+						t.Fatal("disconnect did not record the user's choice")
+					}
+					disconnectedProfile = dsbotRead(profiles[index])
+				}
+				writeProfile(profiles[index], stale)
+			}
+			runRound()
+			for index, candidate := range agents {
+				file := profiles[index]
+				if candidate.ID != disconnectID {
+					if !dshListed(file, "deepseek/flash") {
+						t.Errorf("the round did not repair the route for connected %s", candidate.ID)
+					}
+					continue
+				}
+				if dsbotRead(file) != stale {
+					t.Fatalf("the round rewrote the profile for disconnected %s", candidate.ID)
+				}
+				writeProfile(file, disconnectedProfile)
+				if err := candidate.Connect(); err != nil {
+					t.Fatal(err)
+				}
+				if candidate.Disconnected() {
+					t.Fatal("reconnect did not clear the user's choice")
+				}
+				writeProfile(file, stale)
+				runRound()
+				if !dshListed(file, "deepseek/flash") {
+					t.Errorf("the round did not repair the route after reconnecting %s", candidate.ID)
+				}
+			}
+		})
+	}
+}
 
 // dshSettled is a profile with magpie's route, and keepDshWired's rounds
 // once the route is what magpie writes: the first round writes it, the
