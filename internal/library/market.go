@@ -439,8 +439,9 @@ var seenServers = struct {
 }{m: map[string]MarketServer{}}
 
 // MarketServers is what the market shows for a search: the featured servers
-// that match it, then the registry's, then the popular ones that do; with no
-// search, the featured and every popular one. A search that is an address —
+// that match it, then the registry's, then the popular ones that do, with
+// exact names first for a word search. With no search it shows the featured
+// and every popular one. A search that is an address —
 // a repository, a page, an endpoint, a package — finds the ones at it.
 func MarketServers(q string) ([]MarketServer, error) {
 	raw := strings.TrimSpace(q)
@@ -488,6 +489,11 @@ func MarketServers(q string) ([]MarketServer, error) {
 		err = ferr
 		add(found)
 		add(pick(popularServers()))
+		exact := func(server MarketServer) bool {
+			shortID := server.ID[strings.LastIndex(server.ID, "/")+1:]
+			return strings.EqualFold(q, server.Title) || strings.EqualFold(q, server.Name) || strings.EqualFold(q, shortID)
+		}
+		sort.SliceStable(out, func(left, right int) bool { return exact(out[left]) && !exact(out[right]) })
 	}
 	if out == nil {
 		out = []MarketServer{}

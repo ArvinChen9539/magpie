@@ -108,6 +108,33 @@ func TestMarketServersPopular(t *testing.T) {
 	}
 }
 
+func TestMarketServersExactNameBeforeDescriptions(t *testing.T) {
+	sandbox(t)
+	was := popularServers
+	popularServers = func() []MarketServer {
+		return readPopular([]byte(`[{"name":"io.github.morluto/rea","title":"REA","description":"Reverse engineer anything","packages":[{"registryType":"npm","identifier":"rea"}]}]`))
+	}
+	t.Cleanup(func() { popularServers = was })
+	registry := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		fmt.Fprint(w, `{"servers":[{"server":{"name":"io.github.example/disk","description":"Read files","remotes":[{"type":"streamable-http","url":"https://example.com/mcp"}]}}]}`)
+	}))
+	t.Cleanup(registry.Close)
+	wasURL := registryURL
+	registryURL = registry.URL
+	t.Cleanup(func() { registryURL = wasURL })
+
+	got, err := MarketServers("REA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) < 2 || got[0].ID != "io.github.morluto/rea" {
+		t.Fatalf("REA should rank before description matches: %v", got)
+	}
+	if !slices.ContainsFunc(got, func(server MarketServer) bool { return server.ID == "io.github.example/disk" }) {
+		t.Fatal("registry description match disappeared")
+	}
+}
+
 // What magpie ships: hundreds of the registry's servers, each one magpie
 // can add, none a Smithery wrapper, and none twice.
 func TestPopularServersSnapshot(t *testing.T) {
