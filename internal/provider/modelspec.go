@@ -34,12 +34,12 @@ type SpecChange struct {
 	// Reasoning is the levels the model offers: a range ("low-high"), a
 	// list ("low,medium,high"), "off" for no reasoning ask at all, or
 	// "auto" for the levels its list gives.
-	Reasoning *string
+	Reasoning, ReasoningOverride *string
 }
 
 // Empty is whether c changes nothing.
 func (c SpecChange) Empty() bool {
-	return c.Context == nil && c.Output == nil && c.Vision == nil && c.Reasoning == nil
+	return c.Context == nil && c.Output == nil && c.Vision == nil && c.Reasoning == nil && c.ReasoningOverride == nil
 }
 
 // Auto is the word that takes one part of a spec back to the vendor's list
@@ -65,6 +65,10 @@ func ParseVision(v string) (*bool, error) {
 // Levels; a range runs from one to the other in that order, both
 // included.
 func (p Provider) ParseLevels(model, v string) (levels []string, off bool, err error) {
+	return parseLevels(p.Known(model), p.ID+"/"+model, v)
+}
+
+func parseLevels(known []string, ref, v string) (levels []string, off bool, err error) {
 	v = strings.ToLower(strings.TrimSpace(v))
 	switch v {
 	case "off", "no", "false":
@@ -74,13 +78,13 @@ func (p Provider) ParseLevels(model, v string) (levels []string, off bool, err e
 	case "":
 		return nil, false, errors.New("reasoning is a range of levels (low-high), a list (low,medium,high), off or auto")
 	}
-	order := p.Known(model)
+	order := known
 	if len(order) == 0 {
 		order = Levels
 	}
 	notLevel := func(l string) error {
-		if len(p.Known(model)) > 0 {
-			return fmt.Errorf("%s/%s has no reasoning level %q (it has %s)", p.ID, model, l, strings.Join(order, ", "))
+		if len(known) > 0 {
+			return fmt.Errorf("%s has no reasoning level %q (it has %s)", ref, l, strings.Join(order, ", "))
 		}
 		return fmt.Errorf("%q is not a reasoning level (they are %s)", l, strings.Join(order, ", "))
 	}
@@ -133,7 +137,10 @@ func ChangeModelSpec(ref string, c SpecChange) (bool, error) {
 
 func setModelSpec(ref string, c SpecChange, did *bool) error {
 	if c.Empty() {
-		return errors.New("say what to change: --context, --output, --vision or --reasoning")
+		return errors.New("say what to change: --context, --output, --vision, --reasoning or --reasoning-override")
+	}
+	if c.Reasoning != nil && c.ReasoningOverride != nil {
+		return errors.New("set --reasoning and --reasoning-override separately")
 	}
 	r := strings.TrimPrefix(strings.TrimSpace(ref), "magpie/")
 	if strings.HasPrefix(r, settings.AnyProvider) {
@@ -147,7 +154,7 @@ func setModelSpec(ref string, c SpecChange, did *bool) error {
 		return err
 	}
 	every := model == "*"
-	if every && (c.Vision != nil || c.Reasoning != nil) {
+	if every && (c.Vision != nil || c.Reasoning != nil || c.ReasoningOverride != nil) {
 		return fmt.Errorf("vision and reasoning are set one model at a time, as a provider's models differ in them; %s takes --context and --output", p.ID+"/*")
 	}
 	for _, n := range []*int{c.Context, c.Output} {
@@ -156,7 +163,8 @@ func setModelSpec(ref string, c SpecChange, did *bool) error {
 		}
 	}
 	setting := c.Context != nil && *c.Context > 0 || c.Output != nil && *c.Output > 0 ||
-		c.Vision != nil && !isAuto(*c.Vision) || c.Reasoning != nil && !isAuto(*c.Reasoning)
+		c.Vision != nil && !isAuto(*c.Vision) || c.Reasoning != nil && !isAuto(*c.Reasoning) ||
+		c.ReasoningOverride != nil && !isAuto(*c.ReasoningOverride)
 	if setting && !every && !p.serves(model) {
 		return fmt.Errorf("%s has no model %s (magpie provider %s lists them)", p.ID, model, p.ID)
 	}
@@ -181,6 +189,16 @@ func setModelSpec(ref string, c SpecChange, did *bool) error {
 		if _, err := keptEfforts(p, model, levels); err != nil {
 			return err
 		}
+	}
+	if c.ReasoningOverride != nil {
+		levels, off, err = parseLevels(nil, key, *c.ReasoningOverride)
+		if err != nil {
+			return err
+		}
+		if off {
+			return errors.New("use none as a reasoning level, auto to clear the override, or --reasoning off to omit reasoning fields")
+		}
+		levels = effortsKept(nil, levels)
 	}
 
 	// every part is good: write them
@@ -212,6 +230,13 @@ func setModelSpec(ref string, c SpecChange, did *bool) error {
 		}
 		changed = changed || ch
 	}
+	if c.ReasoningOverride != nil {
+		ch, err := setEffortOverride(key, levels)
+		if err != nil {
+			return touchedIf(changed, err)
+		}
+		changed = changed || ch
+	}
 	if c.Context != nil {
 		// the provider's Save tells the agents itself, after the settings
 		// above are written
@@ -235,6 +260,23 @@ func isAuto(v string) bool {
 		return true
 	}
 	return false
+}
+
+func setEffortOverride(key string, levels []string) (bool, error) {
+	s := settings.Load()
+	if slices.Equal(s.ModelEffortOverrides[key], levels) && (len(levels) == 0 || !s.ModelReasonless[key]) {
+		return false, nil
+	}
+	if len(levels) == 0 {
+		delete(s.ModelEffortOverrides, key)
+	} else {
+		if s.ModelEffortOverrides == nil {
+			s.ModelEffortOverrides = map[string][]string{}
+		}
+		s.ModelEffortOverrides[key] = levels
+		delete(s.ModelReasonless, key)
+	}
+	return true, settings.Save(s)
 }
 
 // setOutput is SetModelOutput without telling the agents: n over 0 is the
@@ -291,9 +333,10 @@ func ResetModelSpec(ref string) ([]string, error) {
 		gone = append(gone, "vision")
 	}
 	_, narrowed := s.ModelEfforts[key]
-	if narrowed || s.ModelReasonless[key] {
+	if narrowed || s.ModelReasonless[key] || len(s.ModelEffortOverrides[key]) > 0 {
 		delete(s.ModelEfforts, key)
 		delete(s.ModelReasonless, key)
+		delete(s.ModelEffortOverrides, key)
 		gone = append(gone, "reasoning")
 	}
 	if len(gone) > 0 {
@@ -380,6 +423,9 @@ func SpecOf(ref string) (Spec, bool) {
 	if _, ok := s.ModelEfforts[key]; ok || s.ModelReasonless[key] {
 		sp.Reasoning.From = "model"
 	}
+	if !e.Reasonless && len(s.ModelEffortOverrides[key]) > 0 {
+		sp.Reasoning.From = "override"
+	}
 	return sp, true
 }
 
@@ -420,6 +466,11 @@ func ModelSpecs() []SpecRow {
 	for k, es := range s.ModelEfforts {
 		if len(es) > 0 {
 			row(k).Reasoning = strings.Join(es, ",")
+		}
+	}
+	for k, es := range s.ModelEffortOverrides {
+		if len(es) > 0 {
+			row(k).Reasoning = "override " + strings.Join(es, ",")
 		}
 	}
 	for k, off := range s.ModelReasonless {

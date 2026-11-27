@@ -18,7 +18,10 @@ const specUsage = `usage:
                                                  say any of them: --context 200000 or 1m, --output 128k,
                                                  --reasoning low-high (a range), low,medium,high (a list) or off
                                                  (send it no reasoning field); auto as any value takes yours off
-                                                 that one and goes back to the vendor's list and models.dev
+                                                 that one and uses the remaining settings and catalog
+  magpie model spec <provider/model> --reasoning-override <levels|auto>
+                                                 replace the model's supported levels with a verified list
+                                                 such as none,low,high,max, or clear it with auto
   magpie model spec '<provider>/*' --context <n> --output <n>
                                                  a window and max output for every model of that provider that
                                                  has none of its own; vision and reasoning are set per model
@@ -64,7 +67,7 @@ func modelSpec(args []string) error {
 			return nil
 		}
 		if !strings.HasPrefix(flag, "--") {
-			return fmt.Errorf("%q is not one of --context, --output, --vision, --reasoning or --reset\n\n%s", rest[i], specUsage)
+			return fmt.Errorf("%q is not a model spec flag\n\n%s", rest[i], specUsage)
 		}
 		if !inline {
 			if i+1 >= len(rest) || strings.HasPrefix(rest[i+1], "-") {
@@ -96,8 +99,10 @@ func modelSpec(args []string) error {
 			c.Vision = &val
 		case "--reasoning", "--efforts", "--effort", "--levels":
 			c.Reasoning = &val
+		case "--reasoning-override":
+			c.ReasoningOverride = &val
 		default:
-			return fmt.Errorf("unknown flag %s: it takes --context, --output, --vision, --reasoning or --reset\n\n%s", flag, specUsage)
+			return fmt.Errorf("unknown model spec flag %s\n\n%s", flag, specUsage)
 		}
 	}
 	if c.Empty() {
@@ -158,9 +163,14 @@ func showSpec(ref string) error {
 	from := func(part provider.SpecPart, flag string) string {
 		switch part.From {
 		case "model":
+			if flag == "reasoning" {
+				return "yours · --reasoning auto clears this selection"
+			}
 			return "yours · --" + flag + " auto goes back to the vendor's list"
 		case "provider":
 			return "yours for every model of " + p.ID
+		case "override":
+			return "yours · --reasoning-override auto clears the supported level override"
 		}
 		if part.Value == "unknown" {
 			return "neither the vendor's list nor models.dev says · --" + flag + " sets it"

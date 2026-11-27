@@ -14,6 +14,126 @@ import (
 	"github.com/yetone/magpie/internal/usage"
 )
 
+func TestModelEffortOverrideReachesUpstream(t *testing.T) {
+	const model = "deepseek-v4.1-flash"
+	fakeUpstream := &fake{t: t, reply: chatHi}
+	up := setup(t, provider.Chat, fakeUpstream)
+	writeCatalog(t, `{"opencode-go":{"models":{"deepseek-v4.1-flash":{
+		"id":"deepseek-v4.1-flash","reasoning":true,"reasoning_options":[{"type":"effort","values":["low","high","max"]}]
+	}}}}`)
+	for _, vendor := range []struct{ id, catalog string }{{"opencode-go", "opencode-go"}, {"relay", ""}, {"other-relay", ""}} {
+		if err := provider.Save(provider.Provider{
+			ID: vendor.id, Name: vendor.id, Catalog: vendor.catalog, Key: "k",
+			Chat: up.URL + "/v1", Models: []string{model},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	openCode, relay, other := "opencode-go/"+model, "relay/"+model, "other-relay/"+model
+	if err := provider.SaveGroup(provider.Group{ID: "flash", Name: "Flash", Members: []string{relay}}); err != nil {
+		t.Fatal(err)
+	}
+	server := New()
+	check := func(target, want string) {
+		t.Helper()
+		code, body := postTo(t, server, "/v1/responses", `{"model":"`+target+`","stream":true,"input":"hi","reasoning":{"effort":"none"}}`)
+		if code != 200 {
+			t.Fatalf("%s: status %d: %s", target, code, body)
+		}
+		var sent struct {
+			Model  string `json:"model"`
+			Effort string `json:"reasoning_effort"`
+		}
+		if err := json.Unmarshal(fakeUpstream.got, &sent); err != nil {
+			t.Fatal(err)
+		}
+		if sent.Model != model || sent.Effort != want || fakeUpstream.path != "/v1/chat/completions" {
+			t.Errorf("%s: sent %s to %s, want %s at %s on Chat Completions", target, fakeUpstream.got, fakeUpstream.path, model, want)
+		}
+	}
+	for _, target := range []string{openCode, relay, "group/flash", other} {
+		check(target, "low")
+	}
+	for _, target := range []string{openCode, relay} {
+		if err := provider.SetModelSpec(target, provider.SpecChange{ReasoningOverride: new("none,low,high,max")}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, target := range []string{openCode, relay, "group/flash"} {
+		check(target, "none")
+	}
+	check(other, "low")
+	models := httptest.NewRecorder()
+	server.Handler().ServeHTTP(models, httptest.NewRequest("GET", "/v1/models", nil))
+	var listed struct {
+		Data []struct {
+			ID     string   `json:"id"`
+			Levels []string `json:"reasoning_levels"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(models.Body.Bytes(), &listed); err != nil {
+		t.Fatal(err)
+	}
+	want := map[string]string{openCode: "none,low,high,max", relay: "none,low,high,max", "group/flash": "none,low,high,max", other: "low,high,max"}
+	for _, model := range listed.Data {
+		if levels, ok := want[model.ID]; ok {
+			if got := strings.Join(model.Levels, ","); got != levels {
+				t.Errorf("%s advertises %s, want %s", model.ID, got, levels)
+			}
+			delete(want, model.ID)
+		}
+	}
+	if len(want) != 0 {
+		t.Errorf("missing models: %v", want)
+	}
+	if err := provider.SetModelSpec(relay, provider.SpecChange{ReasoningOverride: new("auto")}); err != nil {
+		t.Fatal(err)
+	}
+	check(relay, "low")
+	check("group/flash", "low")
+	check(openCode, "none")
+}
+
+func TestModelEffortOverrideReachesAnthropic(t *testing.T) {
+	const model = "claude-sonnet-5"
+	const target = "relay/" + model
+	fakeUpstream := &fake{t: t, reply: anthropicHi}
+	up := setup(t, provider.Anthropic, fakeUpstream)
+	writeCatalog(t, `{"anthropic":{"models":{"claude-sonnet-5":{
+		"id":"claude-sonnet-5","reasoning":true,"reasoning_options":[{"type":"effort","values":["low","medium","high","xhigh","max"]}]
+	}}}}`)
+	if err := provider.Save(provider.Provider{ID: "relay", Name: "Relay", Key: "k", Anthropic: up.URL, Models: []string{model}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := provider.SetModelSpec(target, provider.SpecChange{ReasoningOverride: new("none,low,medium,high,xhigh,max")}); err != nil {
+		t.Fatal(err)
+	}
+	server := New()
+	check := func(want string) {
+		t.Helper()
+		code, body := postTo(t, server, "/v1/responses", `{"model":"`+target+`","stream":true,"input":"hi","reasoning":{"effort":"none"}}`)
+		if code != 200 {
+			t.Fatalf("status %d: %s", code, body)
+		}
+		var sent struct {
+			Thinking struct {
+				Type string `json:"type"`
+			} `json:"thinking"`
+		}
+		if err := json.Unmarshal(fakeUpstream.got, &sent); err != nil {
+			t.Fatal(err)
+		}
+		if sent.Thinking.Type != want {
+			t.Errorf("thinking type %q, want %q: %s", sent.Thinking.Type, want, fakeUpstream.got)
+		}
+	}
+	check("disabled")
+	if err := provider.SetModelSpec(target, provider.SpecChange{Reasoning: new("off")}); err != nil {
+		t.Fatal(err)
+	}
+	check("")
+}
+
 func TestFitEffort(t *testing.T) {
 	glm := []string{"low", "high", "max"}
 	for _, c := range []struct {

@@ -89,3 +89,33 @@ func TestModelEffortsOfARelayThatListsNone(t *testing.T) {
 		t.Fatalf("reset of nothing:\n%s", out)
 	}
 }
+
+func TestModelSpecReasoningOverride(t *testing.T) {
+	groupsHome(t)
+	const ref = "a/only-a"
+	for _, value := range []string{"off", "none,turbo"} {
+		if _, err := runOut(t, "model", "spec", ref, "--output", "16k", "--reasoning-override", value); err == nil {
+			t.Fatalf("accepted override %q", value)
+		}
+	}
+	if s := settings.Load(); len(s.ModelEffortOverrides) > 0 || len(s.ModelOutputs) > 0 {
+		t.Fatal("a rejected override wrote settings")
+	}
+	for _, mode := range []string{"auto", "--reset"} {
+		out, err := runOut(t, "model", "spec", ref, "--reasoning-override=high,none,low,HIGH")
+		if err != nil || !strings.Contains(out, "none,low,high") || !strings.Contains(out, "clears the supported level override") {
+			t.Fatalf("override: %q %v", out, err)
+		}
+		out, err = runOut(t, "model", "specs")
+		if err != nil || !strings.Contains(out, "reasoning override none,low,high") {
+			t.Fatalf("list: %q %v", out, err)
+		}
+		reset := []string{"model", "spec", ref, mode}
+		if mode == "auto" {
+			reset[3] = "--reasoning-override=auto"
+		}
+		if out, err := runOut(t, reset...); err != nil || len(settings.Load().ModelEffortOverrides) != 0 {
+			t.Fatalf("reset %s: %q %v", mode, out, err)
+		}
+	}
+}

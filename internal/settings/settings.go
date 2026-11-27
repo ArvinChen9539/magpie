@@ -1269,7 +1269,8 @@ type Settings struct {
 	// model with no levels known they are the levels given it, and the
 	// gateway fits a request to them (see provider.SetModelEfforts,
 	// magpie model spec).
-	ModelEfforts map[string][]string `json:"modelEfforts,omitempty"`
+	ModelEfforts         map[string][]string `json:"modelEfforts,omitempty"`
+	ModelEffortOverrides map[string][]string `json:"modelEffortOverrides,omitempty"`
 	// ModelReasonless are the models the user said take no reasoning ask,
 	// by "<provider id>/<model id>": magpie offers them no levels and
 	// sends them no reasoning field, on any API, though their list says

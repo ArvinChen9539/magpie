@@ -2011,6 +2011,8 @@ magpie model spec kenari/glm-5:free                          # what it has, and 
 magpie model spec kenari/glm-5:free --context 128k --output 16k --vision on --reasoning low-high
 magpie model spec kenari/glm-5:free --reasoning low,medium,high   # a list instead of a range
 magpie model spec kenari/glm-5:free --reasoning off          # send it no reasoning field
+magpie model spec kenari/glm-5:free --reasoning-override none,low,high,max # set its verified supported levels
+magpie model spec kenari/glm-5:free --reasoning-override auto # use the catalog's supported levels again
 magpie model spec kenari/glm-5:free --vision auto            # take one value of yours off
 magpie model spec "kenari/*" --context 200000 --output 32k   # every model of the provider without its own
 magpie model spec kenari/glm-5:free --reset                  # take every value of yours off
@@ -2028,6 +2030,13 @@ the vendor is still asked at any level it has, as with
 `magpie model efforts`. A bad number, an
 unknown flag, a level that isn't one, or a range that runs backwards is
 refused, and nothing of the command is written.
+
+`--reasoning-override` sets the complete list of supported levels for that
+provider and model in `modelEffortOverrides`. Use the levels verified for that
+upstream. Request routing and agent model exports use the override, and any
+existing reasoning selection still narrows the levels offered. `none` is a
+level that explicitly asks for thinking off. The override survives catalog
+refreshes and restarts. Clear it with `--reasoning-override auto`.
 
 What you set wins everywhere magpie reads a model: the app's badges and
 level chips, the gateway's `/v1/models` (`context_window`,

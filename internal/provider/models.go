@@ -2325,6 +2325,9 @@ func zeroPrice(pr catalog.Price) bool {
 
 // Known are the model's own reasoning levels, when known.
 func (p Provider) Known(model string) []string {
+	if levels := heldSettings().ModelEffortOverrides[p.ID+"/"+model]; len(levels) > 0 {
+		return slices.Clone(levels)
+	}
 	for _, m := range p.Available() {
 		if m.ID == model {
 			return effortsOf(m)
@@ -2348,6 +2351,9 @@ func (p Provider) Known(model string) []string {
 // (@czhhcz on X: `magpie model efforts` listed five for a relay's Claude
 // model whose list said none, and didn't say where they came from).
 func (p Provider) KnownBorrowed(model string) bool {
+	if len(heldSettings().ModelEffortOverrides[p.ID+"/"+model]) > 0 {
+		return false
+	}
 	for _, m := range p.Available() {
 		if m.ID == model {
 			if m.EffortsBorrowed {
@@ -4056,6 +4062,14 @@ func sharedEntry(p *Provider, m catalog.Model, s settings.Settings) Entry {
 	// none at all; one its source says nothing of thinks as most of the
 	// providers serving it say (#402)
 	e.Reasoning = m.Reasoning || m.AlwaysThinks || len(e.Efforts) > 0 || catalog.Thinks(m.ID)
+	override := s.ModelEffortOverrides[e.ID]
+	if len(override) > 0 {
+		e.Efforts = slices.Clone(override)
+		e.AlwaysThinks = e.AlwaysThinks && !slices.Contains(override, "none")
+		if !slices.Contains(override, e.DefaultEffort) {
+			e.DefaultEffort = ""
+		}
+	}
 	e.Efforts = effortsKept(e.Efforts, s.ModelEfforts[e.ID])
 	// levels the user gave a model with none known say it thinks too, so
 	// an agent told its levels isn't told it doesn't reason
@@ -4065,7 +4079,7 @@ func sharedEntry(p *Provider, m catalog.Model, s settings.Settings) Entry {
 	// already. Its subagents take their tasks as text from a magpie-served
 	// lead, so Codex is told V2 for it, where Ultra hands work to them
 	// (codexcat.Entries).
-	if (p.Account == nil || p.Account.Agent != "codex") && len(m.Codex) == 0 {
+	if len(override) == 0 && (p.Account == nil || p.Account.Agent != "codex") && len(m.Codex) == 0 {
 		e.Efforts = withUltra(m.ID, e.Efforts)
 		e.AgentsV2 = slices.Contains(e.Efforts, "ultra")
 	}

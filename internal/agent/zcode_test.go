@@ -254,6 +254,46 @@ func TestZCodeOutputAndReasoning(t *testing.T) {
 	}
 }
 
+func TestZCodeSyncKeepsModelEffortOverride(t *testing.T) {
+	home := syncHome(t)
+	config := filepath.Join(home, ".zcode", "v2", "config.json")
+	rules := filepath.Join(home, ".zcode", "v2", "provider_config.json")
+	if err := os.MkdirAll(filepath.Dir(config), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(config, []byte(`{}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeCatalog := func() {
+		t.Helper()
+		if err := os.WriteFile(catalog.CachePath(), []byte(`{"zai":{"models":{"glm-4.6":{"id":"glm-4.6","reasoning_options":[{"type":"effort","values":["max"]}]}}}}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		catalog.Reset()
+	}
+	writeCatalog()
+	t.Cleanup(catalog.Reset)
+	if err := zcode(home).Field("provider").Set("magpie"); err != nil {
+		t.Fatal(err)
+	}
+	check := func(want string) {
+		t.Helper()
+		body, err := os.ReadFile(rules)
+		if err != nil || !strings.Contains(string(body), want) {
+			t.Fatalf("rules lack %s: %s %v", want, body, err)
+		}
+	}
+	check(`"reasoningLevel":{"values":["max"]}`)
+	if err := provider.SetModelSpec("relay/glm-4.6", provider.SpecChange{ReasoningOverride: new("none,low,high,max")}); err != nil {
+		t.Fatal(err)
+	}
+	writeCatalog()
+	if err := zcode(home).Sync(); err != nil {
+		t.Fatal(err)
+	}
+	check(`"reasoningLevel":{"values":["disabled","low","high","max"]}`)
+}
+
 func TestZCodeDefaultLevel(t *testing.T) {
 	for _, c := range []struct {
 		in   []string

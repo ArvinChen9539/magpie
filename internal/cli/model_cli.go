@@ -48,6 +48,7 @@ const modelUsage = `usage:
   magpie model output <provider/model> --reset   take your limit off this model
   magpie model spec <provider/model>             its context window, max output, vision and reasoning levels
   magpie model spec <provider/model> [--context <n>] [--output <n>] [--vision on|off] [--reasoning <levels>]
+  magpie model spec <provider/model> --reasoning-override <levels|auto>
                                                  say any of them at once, e.g. --reasoning low-high; auto as a
                                                  value goes back to the vendor's list (magpie model spec --help)
   magpie model spec <provider/model> --reset     take every value you set off this model

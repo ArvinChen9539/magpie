@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/yetone/magpie/internal/provider"
 	"github.com/yetone/magpie/internal/settings"
 )
 
@@ -88,5 +89,14 @@ func TestProviderSaveModelPrefs(t *testing.T) {
 	}
 	if got, ok := settings.Load().ModelSystemPrompts["relay/sol"]; ok {
 		t.Fatalf("cleared: %q", got)
+	}
+	if err := provider.SetModelSpec("relay/sol", provider.SpecChange{ReasoningOverride: new("none,low,high")}); err != nil {
+		t.Fatal(err)
+	}
+	if w := post(`{"id":"relay","from":"relay","name":"Relay","chat":"http://127.0.0.1:1/v1","models":["sol"],"modelPrefs":{"sol":{"efforts":["none","low"]}}}`); w.Code != 200 || !strings.Contains(w.Body.String(), `"efforts":["none","low","high"]`) {
+		t.Fatalf("override shown and selectable: %d %s", w.Code, w.Body)
+	}
+	if s := settings.Load(); !slices.Equal(s.ModelEfforts["relay/sol"], []string{"none", "low"}) || !slices.Equal(s.ModelEffortOverrides["relay/sol"], []string{"none", "low", "high"}) {
+		t.Fatalf("selection %v, override %v", s.ModelEfforts, s.ModelEffortOverrides)
 	}
 }
