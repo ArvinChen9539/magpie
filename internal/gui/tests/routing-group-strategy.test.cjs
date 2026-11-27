@@ -26,7 +26,7 @@ const base = { members: ["a/sol", "b/flash", "c/luna"], ready: true, memberInfo:
 
 const words = {
   en: { order: "In order", manual: "Manual", weight: "By weight", smart: "Quota first", head: "Routing", edit: "Edit",
-    names: ["Quota first", "In order", "Until used up", "In turn", "Least used first", "Use before expiry", "Free first", "Speed first", "Cheapest first", "Free quota by expiry", "Small context first", "By weight", "Manual"],
+    names: ["Quota first", "In order", "Until used up", "Before expiry, one by one", "In turn", "Least used first", "Use before expiry", "Free first", "Speed first", "Cheapest first", "Free quota by expiry", "Small context first", "By weight", "Manual"],
     tip: "How Auto routes: click to change it", saved: "Auto: Manual" },
   zh: { order: "按顺序", manual: "手动", weight: "按权重", smart: "额度优先", head: "路由", edit: "编辑",
     tip: "Auto 的路由方式：点击更改", saved: "Auto：手动" },
@@ -140,7 +140,7 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
         assert.equal(await menu.locator(".pm-head").textContent(), w.head);
         const items = menu.locator(".pm-item");
         if (w.names) assert.deepEqual(await items.locator(".pm-name").allTextContents(), w.names);
-        assert.equal(await items.count(), 13);
+        assert.equal(await items.count(), words.en.names.length);
         assert.deepEqual(await menu.locator('.pm-item[aria-checked="true"] .pm-name').allTextContents(), [w.order]);
         assert.equal(await page.locator(".rt-gedit").count(), 0, "opening the menu opens no editor");
         // the menu sits inside the window
@@ -229,7 +229,7 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
       assert.equal(await btn.getAttribute("title"), words[lang].tip);
       await btn.click();
       await page.locator(".proto-menu").waitFor();
-      assert.equal(await page.locator(".proto-menu .pm-item").count(), 13);
+      assert.equal(await page.locator(".proto-menu .pm-item").count(), words.en.names.length);
       assert.deepEqual(errors, []);
     });
   }
