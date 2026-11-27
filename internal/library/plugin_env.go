@@ -125,6 +125,13 @@ func pluginHookEnv(cmd, name string) (string, string) {
 	return "export CLAUDE_PLUGIN_ROOT=" + q(root) + " CLAUDE_PLUGIN_DATA=" + q(data) + "; " + cmd, ""
 }
 
+func codexPluginHookEnv(command, bundle string) string {
+	quote := func(path string) string {
+		return "'" + strings.ReplaceAll(filepath.ToSlash(path), "'", `'\''`) + "'"
+	}
+	return "export PLUGIN_ROOT=" + quote(pluginDir(bundle)) + " PLUGIN_DATA=" + quote(pluginData(bundle)) + "; " + command
+}
+
 // gitBash is the Git Bash Claude Code runs hooks in on Windows, found as
 // Claude Code finds it: CLAUDE_CODE_GIT_BASH_PATH, Git's two install
 // folders, then the bash beside the git on PATH. "" is none.

@@ -446,6 +446,8 @@ func (sp *hookSpec) entry(h *Hook, ev string) json.RawMessage {
 	if sp.agent == "claude" && h.Bundle != "" {
 		// a plugin's hook, run with the variables Claude Code gives its own
 		command, shell = pluginHookEnv(command, h.Bundle)
+	} else if sp.agent == "codex" && h.Bundle != "" && strings.HasPrefix(h.Event, "codex:") && cmdOS != "windows" {
+		command = codexPluginHookEnv(command, h.Bundle)
 	}
 	var v any
 	if sp.flat {
