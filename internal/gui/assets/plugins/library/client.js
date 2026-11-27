@@ -4070,6 +4070,7 @@ magpie.plugin("library", (ctx) => {
   function healthWords(h, s) {
     const more = (x) => (h.detail ? x + "\n" + h.detail : x);
     const count = (n) => (n === 1 ? t("1 tool") : t("{n} tools", { n }));
+    if (h.why === "renewal-unavailable") return [t("renewal temporarily unavailable"), more(t("Your sign-in is saved. Magpie retries renewal on the next request after a short wait"))];
     // it exits in home and lists its tools in a project folder, where an
     // agent starts it (fff-mcp, math_milian on Discord): fine for agents
     // that start it themselves, not those magpie runs it for, in home
@@ -4168,7 +4169,8 @@ magpie.plugin("library", (ctx) => {
       // agent's own launch sets says nothing of the server, so it isn't
       // painted as broken (#2308, ASD-max: Codex's host-only codex_app,
       // whose pipe Codex itself hands it)
-      b.className = "lib-health " + (e.h.state === "ok" || e.h.agentSignIn?.length ? "ok" : e.h.state === "auth" || e.h.why === "ratelimited" ? "auth" : e.h.why === "novar" || e.h.why === "wsldown" ? "unknown" : "err");
+      const renewalWait = ["ratelimited", "renewal-unavailable"].includes(e.h.why);
+      b.className = "lib-health " + (renewalWait ? "auth" : e.h.state === "ok" || e.h.agentSignIn?.length ? "ok" : e.h.state === "auth" ? "auth" : e.h.why === "novar" || e.h.why === "wsldown" ? "unknown" : "err");
       b.replaceChildren(el("span", "", text));
       if (toolList(b.dataset.server).length) {
         const open = toolsOpen.has(b.dataset.server);

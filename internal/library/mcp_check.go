@@ -153,8 +153,8 @@ func healthKey(s *Server, own ownSignIns) string {
 	}
 	// and the agents signed in to it themselves: one signed in since
 	// isn't left as "needs sign-in"
-	// and a renewal's wait for a 429 (#7451): checked again once it is over
-	return fmt.Sprintf("%s|%v|%v|%d|%d|%q|%q", b, st.SignedIn, st.Dead, st.At, st.RetryAt, sides, own.of(s))
+	// and the renewal wait: checked again once it is over
+	return fmt.Sprintf("%s|%v|%v|%d|%d|%v|%q|%q", b, st.SignedIn, st.Dead, st.At, st.RetryAt, st.RenewalUnavailable, sides, own.of(s))
 }
 
 // CheckServers checks the library's servers called names (every one when
@@ -262,6 +262,9 @@ func checkServer(ctx context.Context, s *Server, own ownSignIns) ServerHealth {
 		// only a server magpie is signed in to has one to report
 		if st := mcpauth.StatusOf(s.Name, s.URL); st.SignedIn || st.Dead {
 			h.SignIn = &st
+			if h.State == "ok" && st.RenewalUnavailable {
+				h.Why = "renewal-unavailable"
+			}
 		}
 	}
 	if h.State == "auth" && s.Transport != "stdio" {
@@ -855,16 +858,22 @@ func remoteHeaders(ctx context.Context, s *Server) (http.Header, *ServerHealth) 
 	return h, nil
 }
 
-// renewHealth is a sign-in whose token couldn't be had: one the server
-// rate-limited the renewal of is still signed in, and waits, not "needs
-// sign-in" beside "Signed in" (#7451, Asher-S-Wu); any other asks for a
-// sign-in.
+// renewHealth distinguishes a retry wait from a sign-in that has run out.
 func renewHealth(err error, code int) *ServerHealth {
 	if errors.Is(err, mcpauth.ErrRateLimited) {
 		h := failed("ratelimited", err.Error())
 		return &h
 	}
-	return &ServerHealth{State: "auth", Code: code, OAuth: true, Detail: err.Error()}
+	var unavailable *mcpauth.RenewalUnavailableError
+	if errors.As(err, &unavailable) {
+		h := failed("renewal-unavailable", err.Error())
+		return &h
+	}
+	if errors.Is(err, mcpauth.ErrExpired) || errors.Is(err, mcpauth.ErrNotSignedIn) {
+		return &ServerHealth{State: "auth", Code: code, OAuth: true, Detail: err.Error()}
+	}
+	h := failed("renewal-failed", err.Error())
+	return &h
 }
 
 // netHealth puts a failed request in the page's words.
@@ -930,38 +939,57 @@ func newHTTPSession(ctx context.Context, s *Server) (*httpSession, *ServerHealth
 	return c, nil
 }
 
-func (c *httpSession) post(ctx context.Context, body []byte) (*http.Response, error) {
+func (c *httpSession) post(ctx context.Context, body []byte) (*http.Response, string, *ServerHealth) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.s.URL, bytes.NewReader(body))
 	if err != nil {
-		return nil, err
+		h := netHealth(ctx, err)
+		return nil, "", &h
 	}
 	c.mu.Lock()
 	for k, v := range c.hdr {
 		req.Header[k] = slices.Clone(v)
 	}
-	session, version := c.session, c.version
+	session, version, token := c.session, c.version, c.tok
 	c.mu.Unlock()
+	if token != "" {
+		record, ok := mcpauth.Get(c.s.Name)
+		if !ok || record.URL != c.s.URL {
+			return nil, "", renewHealth(mcpauth.ErrNotSignedIn, 0)
+		}
+		token = record.UsableAccess()
+		if token == "" {
+			token, err = mcpauth.Token(ctx, c.s.Name)
+			if err != nil {
+				return nil, "", renewHealth(err, 0)
+			}
+		}
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept", "application/json, text/event-stream")
 	if session != "" {
 		req.Header.Set("Mcp-Session-Id", session)
 		req.Header.Set("MCP-Protocol-Version", version)
 	}
-	return checkClient.Do(req)
+	resp, err := checkClient.Do(req)
+	if err != nil {
+		h := netHealth(ctx, err)
+		return nil, "", &h
+	}
+	return resp, token, nil
 }
 
 // call posts a request and reads its reply, as JSON or from an event
 // stream; what else the stream says about it goes to ctx's call
 // (mcp_hub_notes.go).
 func (c *httpSession) call(ctx context.Context, id int, body []byte) (*rpcMsg, *ServerHealth) {
-	res, err := c.post(ctx, body)
-	if err != nil {
-		h := netHealth(ctx, err)
-		return nil, &h
+	res, tok, bad := c.post(ctx, body)
+	if bad != nil {
+		return nil, bad
 	}
 	defer res.Body.Close()
 	c.mu.Lock()
-	tok, renewed := c.tok, c.renewed
+	renewed := c.renewed && tok == c.tok
 	c.mu.Unlock()
 	if res.StatusCode == 401 && tok != "" {
 		if renewed {
@@ -1023,12 +1051,14 @@ func (c *httpSession) initialize(ctx context.Context, init []byte) *ServerHealth
 	}
 	c.mu.Unlock()
 	stepTo(ctx, "notifications/initialized")
-	if res, err := c.post(ctx, initializedNote); err == nil {
+	if res, _, bad := c.post(ctx, initializedNote); bad == nil {
 		io.Copy(io.Discard, io.LimitReader(res.Body, 1<<16))
 		res.Body.Close()
 	} else if ctx.Err() != nil {
 		h := timedOut(ctx)
 		return &h
+	} else if bad.Why == "renewal-unavailable" || bad.Why == "ratelimited" || bad.Why == "renewal-failed" || bad.State == "auth" {
+		return bad
 	}
 	return nil
 }
@@ -1036,9 +1066,17 @@ func (c *httpSession) initialize(ctx context.Context, init []byte) *ServerHealth
 // end tells the server the session is done with, when it gave one.
 func (c *httpSession) end() {
 	c.mu.Lock()
-	hdr, session := c.hdr.Clone(), c.session
+	hdr, session, token := c.hdr.Clone(), c.session, c.tok
 	c.mu.Unlock()
 	if session != "" {
+		if token != "" {
+			record, ok := mcpauth.Get(c.s.Name)
+			access := record.UsableAccess()
+			if !ok || record.URL != c.s.URL || access == "" {
+				return
+			}
+			hdr.Set("Authorization", "Bearer "+access)
+		}
 		endSession(c.s.URL, hdr, session)
 	}
 }

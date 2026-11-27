@@ -73,8 +73,8 @@ func TestRenew429WaitsRetryAfter(t *testing.T) {
 		}()
 		go func() {
 			defer wg.Done()
-			if _, err := mcpauth.Token(t.Context(), "canva"); err != nil {
-				t.Errorf("Token in the wait of a token that lasts: %v", err)
+			if access, err := mcpauth.Token(t.Context(), "canva"); access != "" || !errors.Is(err, mcpauth.ErrRateLimited) {
+				t.Errorf("Token during the wait after rejection: %q, %v", access, err)
 			}
 		}()
 	}

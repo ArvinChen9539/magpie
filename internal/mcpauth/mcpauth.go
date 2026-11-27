@@ -139,6 +139,16 @@ func (e *RateLimitError) Error() string {
 func (e *RateLimitError) Is(target error) bool { return target == ErrRateLimited }
 func (e *RateLimitError) Unwrap() error        { return e.Cause }
 
+type RenewalUnavailableError struct{ At time.Time }
+
+func (e *RenewalUnavailableError) Wait() time.Duration {
+	return max(e.At.Sub(clock()).Round(time.Second), time.Second)
+}
+
+func (e *RenewalUnavailableError) Error() string {
+	return "MCP sign-in renewal is temporarily unavailable; retry in " + e.Wait().String()
+}
+
 // ErrNoSignIn is a server that answered an agent's first request without
 // asking for a sign-in: it works as it is. One that takes a key as a header
 // takes it in Headers; one that signs in only at another address (Exa's
@@ -210,12 +220,12 @@ type Record struct {
 	// Dead is a sign-in the server refused to renew: the page asks for it
 	// again
 	Dead bool `json:"dead,omitempty"`
-	// RetryAt is when a renewal the token endpoint turned away with 429
-	// may be asked for again, unix ms; RateLimits counts the 429s in a
-	// row, for the wait when the server named none. A renewal, or signing
-	// in again, ends both; each account has its own.
-	RetryAt    int64 `json:"retryAt,omitempty"`
-	RateLimits int   `json:"rateLimits,omitempty"`
+	// RetryAt is when a failed renewal may be asked for again, unix ms.
+	// RateLimits and RenewFailures count the consecutive failures of each kind.
+	RetryAt        int64 `json:"retryAt,omitempty"`
+	RateLimits     int   `json:"rateLimits,omitempty"`
+	RenewFailures  int   `json:"renewFailures,omitempty"`
+	AccessRejected bool  `json:"accessRejected,omitempty"`
 
 	// More than one sign-in to a server (Elorynth on X: several accounts,
 	// one in use). This record is always the one in use, so every reader of
@@ -351,9 +361,10 @@ type Status struct {
 	SignedIn bool  `json:"signedIn"`
 	Dead     bool  `json:"dead,omitempty"`
 	At       int64 `json:"at,omitempty"`
-	// RetryAt is when a rate-limited renewal is asked for again, unix ms,
+	// RetryAt is when a failed renewal is asked for again, unix ms,
 	// while that is still to come
-	RetryAt int64 `json:"retryAt,omitempty"`
+	RetryAt            int64 `json:"retryAt,omitempty"`
+	RenewalUnavailable bool  `json:"renewalUnavailable,omitempty"`
 	// Accounts are the sign-ins, when there is more than one
 	Accounts []Account `json:"accounts,omitempty"`
 }
@@ -367,6 +378,7 @@ func StatusOf(name, serverURL string) Status {
 	st := Status{SignedIn: true, Dead: r.Dead, At: r.At}
 	if !r.Dead && cooling(r) {
 		st.RetryAt = r.RetryAt
+		st.RenewalUnavailable = r.RenewFailures > 0
 	}
 	if l := Accounts(name); len(l) > 1 {
 		st.Accounts = l
@@ -586,7 +598,7 @@ func Token(ctx context.Context, name string) (string, error) {
 	if !due(r) {
 		return r.Access, nil
 	}
-	// a renewal turned away with 429 isn't asked for again before its
+	// a failed renewal isn't asked for again before its
 	// time, by this request or any other: a token still good meanwhile
 	// is used
 	if cooling(r) {
@@ -598,23 +610,44 @@ func Token(ctx context.Context, name string) (string, error) {
 // Renew renews the sign-in the server just refused stale, unless another
 // request renewed it meanwhile: then the new token is returned.
 func Renew(ctx context.Context, name, stale string) (string, error) {
+	if err := update(func(records map[string]*Record) bool {
+		cur := records[name]
+		if cur == nil || cur.Access != stale || cur.Dead || cur.AccessRejected {
+			return false
+		}
+		cur.AccessRejected = true
+		return true
+	}); err != nil {
+		return "", err
+	}
 	return renew(ctx, name, func(cur Record) bool { return cur.Access == stale }, false)
 }
 
 func due(r Record) bool {
-	return r.Expires != 0 && clock().Add(renewLead).UnixMilli() >= r.Expires
+	return r.AccessRejected || r.Expires != 0 && clock().Add(renewLead).UnixMilli() >= r.Expires
 }
 
-// cooling says a renewal of r was turned away with 429 and its wait isn't
-// over.
+// cooling says the wait for a failed renewal isn't over.
 func cooling(r Record) bool { return r.RetryAt > clock().UnixMilli() }
+
+func (r Record) UsableAccess() string {
+	if r.Dead || r.AccessRejected || r.Expires != 0 && r.Expires <= clock().UnixMilli() {
+		return ""
+	}
+	return r.Access
+}
 
 // waiting is what a request gets while r's renewal waits: its token while
 // it hasn't run out, when the server hasn't refused it (good), else
 // the wait.
 func waiting(r Record, good bool) (string, error) {
-	if good && r.Expires > clock().UnixMilli() {
-		return r.Access, nil
+	if good && r.Expires != 0 {
+		if access := r.UsableAccess(); access != "" {
+			return access, nil
+		}
+	}
+	if r.RenewFailures > 0 {
+		return "", &RenewalUnavailableError{At: time.UnixMilli(r.RetryAt)}
 	}
 	return "", &RateLimitError{At: time.UnixMilli(r.RetryAt)}
 }
@@ -638,7 +671,10 @@ func renew(ctx context.Context, name string, still func(Record) bool, good bool)
 		return "", ErrExpired
 	}
 	if !still(r) {
-		return r.Access, nil
+		if access := r.UsableAccess(); access != "" {
+			return access, nil
+		}
+		good = true
 	}
 	if cooling(r) {
 		return waiting(r, good)
@@ -658,21 +694,32 @@ func renew(ctx context.Context, name string, still func(Record) bool, good bool)
 		// sign-in: it stays, and nothing asks again before the wait is
 		// over
 		if errors.As(err, &te) && te.Status == http.StatusTooManyRequests {
-			r.RetryAt = markRateLimited(name, r.Access, te.RetryAfter).UnixMilli()
-			if tok, werr := waiting(r, good); werr == nil {
-				return tok, nil
+			cur, saveErr := markRenewalWait(name, r.Access, te.RetryAfter, false)
+			if saveErr != nil {
+				return "", saveErr
 			}
-			return "", &RateLimitError{At: time.UnixMilli(r.RetryAt), Cause: err}
+			if access, waitErr := waiting(cur, good); waitErr == nil {
+				return access, nil
+			}
+			return "", &RateLimitError{At: time.UnixMilli(cur.RetryAt), Cause: err}
 		}
 		if errors.As(err, &te) && (dead(te.Code) || te.Status == http.StatusUnauthorized) {
 			markDead(name, r.Access)
 			return "", ErrExpired
 		}
+		if ctx.Err() == nil && temporaryRenewal(err) {
+			cur, saveErr := markRenewalWait(name, r.Access, 0, true)
+			if saveErr != nil {
+				return "", saveErr
+			}
+			return waiting(cur, good)
+		}
 		return "", err
 	}
+	saved := false
 	err = update(func(m map[string]*Record) bool {
 		cur := m[name]
-		if cur == nil || cur.Access != r.Access {
+		if cur == nil || cur.Access != r.Access || cur.Dead {
 			return false // signed in again, or out, meanwhile
 		}
 		cur.Access = t.Access
@@ -680,10 +727,30 @@ func renew(ctx context.Context, name string, still func(Record) bool, good bool)
 			cur.Refresh = t.Refresh
 		}
 		cur.Expires = t.expires()
-		cur.RetryAt, cur.RateLimits = 0, 0
+		cur.RetryAt, cur.RateLimits, cur.RenewFailures, cur.AccessRejected = 0, 0, 0, false
+		saved = true
 		return true
 	})
-	return t.Access, err
+	if err != nil {
+		return "", err
+	}
+	if !saved {
+		return "", ErrNotSignedIn
+	}
+	return t.Access, nil
+}
+
+func temporaryRenewal(err error) bool {
+	var response *tokenError
+	if errors.As(err, &response) {
+		return response.Status >= 500 && response.Status < 600
+	}
+	var request *url.Error
+	if errors.As(err, &request) {
+		err = request.Err
+	}
+	var network net.Error
+	return errors.As(err, &network) || errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF)
 }
 
 // dead says a token endpoint's error means the refresh token, or the app
@@ -714,29 +781,37 @@ func markDead(name, access string) {
 	})
 }
 
-// markRateLimited records the 429 a renewal of the sign-in holding access
-// got, and is when it may be asked for again: after retryAfter, the wait
-// the server gave, or the next step of the backoff when it gave none. A
-// sign-in redone meanwhile is left as it is.
-func markRateLimited(name, access string, retryAfter time.Duration) time.Time {
+func markRenewalWait(name, access string, retryAfter time.Duration, temporary bool) (Record, error) {
 	now := clock()
 	at := now.Add(max(retryAfter, rateLimitBase/30)) // never asked again at once
-	_ = update(func(m map[string]*Record) bool {
+	var saved Record
+	err := update(func(m map[string]*Record) bool {
 		cur := m[name]
-		if cur == nil || cur.Access != access {
+		if cur == nil || cur.Access != access || cur.Dead {
 			return false
 		}
-		if retryAfter <= 0 {
-			at = now.Add(backoff(cur.RateLimits))
+		if temporary {
+			at = now.Add(backoff(cur.RenewFailures))
+			cur.RenewFailures++
+			cur.RateLimits = 0
+		} else {
+			if retryAfter <= 0 {
+				at = now.Add(backoff(cur.RateLimits))
+			}
+			cur.RateLimits++
+			cur.RenewFailures = 0
 		}
-		cur.RateLimits++
 		cur.RetryAt = at.UnixMilli()
+		saved = *cur
 		return true
 	})
-	return at
+	if err == nil && saved.Access == "" {
+		err = ErrNotSignedIn
+	}
+	return saved, err
 }
 
-// backoff is the wait after n 429s in a row that named none.
+// backoff is the wait after n renewal failures of the same kind.
 func backoff(n int) time.Duration {
 	d := rateLimitBase
 	for ; n > 0 && d < rateLimitMax; n-- {

@@ -76,15 +76,16 @@ type Fake struct {
 	refuse bool // RefuseTokens
 	// throttle is a token endpoint turning every renewal away with 429
 	// (Throttle), with this Retry-After when it isn't ""
-	throttle     bool
-	retryAfter   string
-	refreshAsked int
-	codes        map[string]codeGrant
-	secrets      map[string]string // client id → secret, of those that have one
-	methods      map[string]string // client id → its token_endpoint_auth_method
-	valid        map[string]bool   // access tokens
-	refresh      map[string]bool
-	n            int
+	throttle      bool
+	refreshStatus int
+	retryAfter    string
+	refreshAsked  int
+	codes         map[string]codeGrant
+	secrets       map[string]string // client id → secret, of those that have one
+	methods       map[string]string // client id → its token_endpoint_auth_method
+	valid         map[string]bool   // access tokens
+	refresh       map[string]bool
+	n             int
 }
 
 type codeGrant struct{ challenge, client, redirect, resource, scope string }
@@ -225,6 +226,10 @@ func New(t *testing.T) *Fake {
 			offline = offline || slices.Contains(strings.Fields(g.scope), "offline_access")
 		case "refresh_token":
 			f.refreshAsked++
+			if f.refreshStatus != 0 {
+				http.Error(w, http.StatusText(f.refreshStatus), f.refreshStatus)
+				return
+			}
 			if f.throttle {
 				// Canva's answer (#7451, Asher-S-Wu)
 				if f.retryAfter != "" {
@@ -448,4 +453,10 @@ func (f *Fake) RefreshAsked() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.refreshAsked
+}
+
+func (f *Fake) SetRefreshStatus(status int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refreshStatus = status
 }

@@ -6,7 +6,9 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/yetone/magpie/internal/mcpauth"
 	"github.com/yetone/magpie/internal/mcpauth/mcpauthtest"
 )
 
@@ -16,6 +18,8 @@ import (
 // renew again.
 func TestMCPProxyRenewal429(t *testing.T) {
 	fresh(t)
+	now := time.Now().Truncate(time.Second)
+	t.Cleanup(mcpauth.SetClockForTest(func() time.Time { return now }))
 	f := mcpauthtest.New(t)
 	f.SignIn(t, "canva")
 	gw := httptest.NewServer(New().Handler())
@@ -34,7 +38,7 @@ func TestMCPProxyRenewal429(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		ra := resp.Header.Get("Retry-After")
-		if resp.StatusCode != http.StatusTooManyRequests || (ra != "60" && ra != "59") || resp.Header.Get("WWW-Authenticate") != "" {
+		if resp.StatusCode != http.StatusTooManyRequests || ra != "60" || resp.Header.Get("WWW-Authenticate") != "" {
 			t.Fatalf("request %d: %d Retry-After %q %v %s", i, resp.StatusCode, ra, resp.Header, b)
 		}
 		if !strings.Contains(string(b), "canva") || strings.Contains(string(b), "sign in to it again") {

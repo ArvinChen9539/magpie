@@ -286,6 +286,17 @@ func TestMCPProxyRefusedAfterRenewalRunsOut(t *testing.T) {
 	}
 }
 
+func TestMCPProxyUnavailableRenewalTellsAgentToWait(t *testing.T) {
+	now := time.Now()
+	t.Cleanup(mcpauth.SetClockForTest(func() time.Time { return now }))
+	response := httptest.NewRecorder()
+	mcpRefused(response, "synthetic", &mcpauth.RenewalUnavailableError{At: now.Add(30 * time.Second)})
+	if response.Code != http.StatusServiceUnavailable || response.Header().Get("Retry-After") != "30" ||
+		response.Header().Get("WWW-Authenticate") != "" || strings.Contains(response.Body.String(), "sign in to it again") {
+		t.Fatalf("temporary renewal failure: %d %v %s", response.Code, response.Header(), response.Body)
+	}
+}
+
 // A server's GET event stream that sends nothing yet (it has no
 // notification for the client) reaches the agent with its headers at once,
 // as agy's MCP client waits on them before it finishes connecting; its

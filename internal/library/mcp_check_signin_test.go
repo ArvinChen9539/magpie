@@ -2,8 +2,10 @@ package library
 
 import (
 	"context"
+	"net/http"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/yetone/magpie/internal/mcpauth"
 	"github.com/yetone/magpie/internal/mcpauth/mcpauthtest"
@@ -86,5 +88,57 @@ func TestCheckSaysRenewalRateLimited(t *testing.T) {
 	}
 	if n := f.RefreshAsked(); n != 1 {
 		t.Fatalf("asked the server to renew %d times, want 1", n)
+	}
+}
+
+func TestCheckRecoversFromTemporaryRenewalFailure(t *testing.T) {
+	sandbox(t)
+	now := time.Now()
+	t.Cleanup(mcpauth.SetClockForTest(func() time.Time { return now }))
+	fake := mcpauthtest.New(t)
+	const name = "temporary-renewal"
+	server := Server{Name: name, Transport: "http", URL: fake.URL, Agents: []string{}}
+	ok(t)(SaveServer("", server))
+	fake.SignIn(t, name)
+	conn, err := dialHTTP(t.Context(), &server)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.close()
+	fake.Revoke()
+	fake.SetRefreshStatus(http.StatusBadGateway)
+	for range 2 {
+		results, err := CheckServers(t.Context(), []string{name}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		health := results[name]
+		if health.State != "error" || health.Why != "renewal-unavailable" || health.OAuth {
+			t.Fatalf("temporary renewal failure: %+v", health)
+		}
+		if health.SignIn == nil || !health.SignIn.SignedIn || health.SignIn.Dead || health.SignIn.RetryAt <= now.UnixMilli() {
+			t.Fatalf("sign-in during retry wait: %+v", health.SignIn)
+		}
+	}
+	if _, err := mcpauth.Token(t.Context(), name); err == nil {
+		t.Fatal("Token returned the rejected access token during the wait")
+	}
+	if _, health := conn.c.call(t.Context(), 2, request(2, "tools/list", nil)); health == nil || health.Why != "renewal-unavailable" {
+		t.Fatalf("existing session during the wait: %+v", health)
+	}
+	if got := fake.RefreshAsked(); got != 1 {
+		t.Fatalf("asked for renewal %d times during the wait, want 1", got)
+	}
+	fake.SetRefreshStatus(0)
+	now = now.Add(time.Minute)
+	results, err := CheckServers(t.Context(), []string{name}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if health := results[name]; health.State != "ok" || health.SignIn == nil || health.SignIn.RetryAt != 0 || fake.RefreshAsked() != 2 {
+		t.Fatalf("health after recovery: %+v, renewal attempts %d", health, fake.RefreshAsked())
+	}
+	if _, health := conn.c.call(t.Context(), 3, request(3, "tools/list", nil)); health != nil || fake.RefreshAsked() != 2 {
+		t.Fatalf("existing session after recovery: %+v, renewal attempts %d", health, fake.RefreshAsked())
 	}
 }

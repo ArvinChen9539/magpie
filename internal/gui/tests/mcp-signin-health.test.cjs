@@ -36,6 +36,7 @@ function server(lang, calls) {
     ],
   };
   let polls = 0;
+  let canvaChecks = 0;
   return async (route) => {
     const req = route.request(), url = new URL(req.url());
     if (url.pathname === "/boot.js") return route.fulfill({ contentType: "text/javascript", body: `window.bootPrefs = {lang:"${lang}",theme:"light",web:true};` });
@@ -52,7 +53,8 @@ function server(lang, calls) {
         // the server refused even a renewed token: the backend marked it run out
         if (n === "linear") s.signIn = { signedIn: true, dead: true, at: 1 };
         if (n === "linear") servers[n] = { state: "auth", code: 401, oauth: true, signIn: s.signIn };
-        else if (n === "canva") servers[n] = { state: "error", why: "ratelimited", detail: "the token endpoint answered 429: too_many_requests (Too many refresh_token requests)", signIn: { ...s.signIn, retryAt: Date.now() + 60000 } };
+        else if (n === "canva" && ++canvaChecks === 1) servers[n] = { state: "error", why: "ratelimited", detail: "the token endpoint answered 429: too_many_requests (Too many refresh_token requests)", signIn: { ...s.signIn, retryAt: Date.now() + 60000 } };
+        else if (n === "canva") servers[n] = { state: "ok", why: "renewal-unavailable", tools: 7, signIn: { ...s.signIn, retryAt: Date.now() + 30000, renewalUnavailable: true } };
         else servers[n] = s.signIn.signedIn ? { state: "ok", tools: 7, signIn: s.signIn } : { state: "auth", code: 401, oauth: true, signIn: s.signIn };
       }
       return route.fulfill({ json: { servers } });
@@ -116,6 +118,14 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
           assert.equal(await status("canva").evaluate((b) => b.classList.contains("auth")), true);
           const tip = await status("canva").getAttribute("title");
           assert.ok(tip.includes(w("The server is limiting how often magpie renews its sign-in. It stays signed in, and magpie renews it once the wait is over")), tip);
+          assert.deepEqual(await tags("canva"), [w("Signed in")]);
+
+          await status("canva").click();
+          await status("canva").locator("span", { hasText: w("renewal temporarily unavailable") }).waitFor();
+          assert.equal(await status("canva").evaluate((b) => b.classList.contains("auth")), true);
+          const transientTip = await status("canva").getAttribute("title");
+          assert.ok(transientTip.includes(w("Your sign-in is saved. Magpie retries renewal on the next request after a short wait")), transientTip);
+          assert.ok(transientTip.includes(w("Click to check again")), transientTip);
           assert.deepEqual(await tags("canva"), [w("Signed in")]);
 
           // notion, checked by a click, then signed in to
