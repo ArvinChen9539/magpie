@@ -198,6 +198,9 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
 
       test(`${label}: a window set aside holds the account at the cap set on it before, and only that one`, async (t) => {
         const { page, errors, posts } = await open(t, "aside", split);
+        const creditButtons = (account) => row(page, account).locator(".aq-w").evaluateAll(
+          (windows) => windows.map((window) => window.matches('.aq-set[role="button"]')),
+        );
         // the friend's Credits at 60%, past the 50% set on it: held, marked
         const held = row(page, "Friend@Example.com").locator(".acap-held");
         if (w.held) assert.match(await held.textContent(), /^[^·]+·/);
@@ -205,7 +208,8 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
         assert.deepEqual(await row(page, "Friend@Example.com").locator(".aq-cap").evaluateAll((ms) => ms.map((m) => m.style.left)), ["50%"]);
         // me has none on it: no note, no mark, and no new cap on a window set aside
         assert.equal(await row(page, "me@example.com").locator(".acap-held, .aq-cap, .aq-own").count(), 0);
-        assert.equal(await row(page, "me@example.com").locator('.aq-set[role="button"]').count(), 0);
+        assert.deepEqual(await creditButtons("me@example.com"), [false, false, true], "only Total credits is settable");
+        assert.deepEqual(await creditButtons("Friend@Example.com"), [true, false, true], "the saved Credits cap and Total credits are settable");
         // the friend's is lifted from its meter
         await still(page, "Friend@Example.com", meter(page, "Friend@Example.com", 0));
         await menu(page).waitFor();
@@ -215,7 +219,7 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
         await item(page, w.off).click();
         assert.deepEqual(await posted(posts, n), { id: "codex", account: "Friend@Example.com", window: "credits", cap: 0 });
         await page.waitForFunction(() => !document.querySelector('.editor .acc[data-account-id="Friend@Example.com"] .acap-held'));
-        assert.equal(await row(page, "Friend@Example.com").locator('.aq-set[role="button"]').count(), 0);
+        assert.deepEqual(await creditButtons("Friend@Example.com"), [false, false, true], "lifting the Credits cap leaves only Total credits settable");
         assert.deepEqual(errors, []);
       });
 
