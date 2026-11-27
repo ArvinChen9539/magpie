@@ -1395,7 +1395,7 @@ func balanceSegmentOf(raw, path string) (balanceSegment, error) {
 // false when there is no way to ask it. A key given limits and no quota of
 // its own has what its fullest window has left: what it can spend now.
 func Balance(ctx context.Context, p Provider) (amount string, ok bool, err error) {
-	amount, _, _, ws, _, ok, err := balanceRead(ctx, p)
+	amount, _, _, ws, _, ok, err := balanceRead(ctx, p, nil)
 	if !ok && errors.Is(err, errNoBalance) {
 		// a relay added by hand whose balance was found nowhere: no
 		// balance to ask, as with no Balance URL
@@ -1417,7 +1417,7 @@ func Balance(ctx context.Context, p Provider) (amount string, ok bool, err error
 // key's own usage windows when its reply tells them (a sub2api key's
 // limits, readSub2APIKeyLimits), and whether what it tells is the
 // account's, the same to each of its keys (wide, balanceAccountWide).
-func balanceRead(ctx context.Context, p Provider) (amount string, parts, split []BalancePart, ws []QuotaWindow, wide, ok bool, err error) {
+func balanceRead(ctx context.Context, p Provider, wallet *string) (amount string, parts, split []BalancePart, ws []QuotaWindow, wide, ok bool, err error) {
 	ctx = p.Via(ctx)
 	p = keyQueryOf(p)
 	// the editor's check asks with the form's headers as they are, a user
@@ -1534,6 +1534,9 @@ func balanceRead(ctx context.Context, p Provider) (amount string, parts, split [
 				return "", nil, nil, ws, false, true, nil
 			}
 			return "", nil, nil, nil, false, true, err
+		}
+		if wallet != nil && res.Request != nil {
+			*wallet = identifyBalanceWallet(p, req.URL, res.Request.URL, b, path, parts, ws)
 		}
 		return joinBalanceParts(parts), parts, nil, ws, ownWide || balanceAccountWide(p, src, b), true, nil
 	}
@@ -1806,7 +1809,8 @@ func KeyBalances(ctx context.Context) []SubscriptionQuota {
 			if j.account {
 				j.p = keyAccountQuery(ctx, j.p)
 			}
-			amount, parts, split, ws, wide, _, err := balanceRead(ctx, j.p)
+			q.balanceWalletStamp = walletConfigStamp(j.p)
+			amount, parts, split, ws, wide, _, err := balanceRead(ctx, j.p, &q.BalanceWallet)
 			if errors.Is(err, errNoBalance) {
 				// a reply with no balance for this key, or a relay where
 				// none was found: the balance typed for it, else no card

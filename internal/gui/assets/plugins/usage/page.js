@@ -651,6 +651,35 @@ function sharedBalances(list) {
   }
   return out;
 }
+
+function walletBalances(list, peek = () => false) {
+  const groups = new Map();
+  const groupOf = (q) => q.balanceWallet && q.balance && !q.error && !q.windows?.length && !q.balanceParts?.length
+    ? JSON.stringify([q.from || "", q.balanceWallet]) : "";
+  const time = (q) => Date.parse(q.readAt || q.asOf) || 0;
+  const newer = (a, b) => !!a.asOf === !!b.asOf ? time(a) > time(b) : !a.asOf;
+  for (const q of list) {
+    const id = groupOf(q);
+    if (!id) continue;
+    const group = groups.get(id);
+    if (!group) {
+      groups.set(id, { first: q, owner: q, reading: q, keys: [q] });
+      continue;
+    }
+    group.keys.push(q);
+    if (peek(q) && !peek(group.owner)) group.owner = q;
+    if (newer(q, group.reading)) group.reading = q;
+  }
+  return list.flatMap((q) => {
+    const group = groups.get(groupOf(q));
+    if (!group || group.keys.length === 1) return [q];
+    if (q !== group.first) return [];
+    const { reading, owner, keys } = group;
+    const sharedKeys = keys.map((k) => k.provider === owner.provider && k.user ? k.user : [k.name, k.user].filter(Boolean).join(" · "));
+    return [{ ...owner, balance: reading.balance, balanceSplit: reading.balanceSplit, balanceTrend: reading.balanceTrend,
+      readAt: reading.readAt, asOf: reading.asOf, readError: reading.readError, readDeferred: reading.readDeferred, sharedKeys }];
+  });
+}
 // beside such a card's key, how many more keys its balance is for, and on
 // hover which
 function sharedKeysNote(q) {
@@ -678,7 +707,7 @@ function keysSum(subs) {
 // card adds them, else the key in use's.
 function rowBalance(p) {
   if (p.account || featuresOff.has("usage")) return "";
-  const cards = sharedBalances((quotas || []).filter((q) => q.provider === p.id && !q.from && q.balance && !q.error));
+  const cards = walletBalances(sharedBalances((quotas || []).filter((q) => q.provider === p.id && !q.from && q.balance && !q.error)));
   if (cards.length < 2) return cards[0]?.balance || "";
   const on = p.keyList?.find((k) => k.active), own = on && cards.find((q) => q.user === (on.name || on.masked));
   return keysSum(cards) || own?.balance || "";
@@ -1525,7 +1554,7 @@ function overviewCards(list) {
   const hid = hiddenCards();
   list = sharedBalances(list);
   list = hid.size ? list.filter((q) => !hid.has(cardHideKey(q)) || cardPeeked(q)) : list;
-  return list.map(withoutHiddenRows);
+  return walletBalances(list, cardPeeked).map(withoutHiddenRows);
 }
 // A card's quota rows can be hidden one by one (wangshaowei39 on X:
 // Antigravity's Claude & GPT rows unwanted), by provider and row group, a
@@ -5775,9 +5804,9 @@ function panelPageCut(list, peek = () => false, hidden = new Set()) {
   list = sharedBalances(list || []).filter((q) => q.balance || q.error || q.windows?.length);
   const gone = (p) => list.every((q) => q.provider !== p || cardHideKeys(q).every((k) => hid.has(k)));
   const kept = list.filter((q) => !hid.has(cardHideKey(q)) || peek(q));
-  const cards = byUsageOrder(keyCards(kept)).map(withoutHiddenRows);
   const peeked = (p) => list.some((q) => q.provider === p && peek(q));
   const away = new Set(list.map((q) => q.provider).filter((p) => (hidden.has(p) || gone(p)) && !peeked(p)));
+  const cards = byUsageOrder(keyCards(walletBalances(kept.filter((q) => !away.has(q.provider)), peek))).map(withoutHiddenRows);
   return { gone, away, cards };
 }
 

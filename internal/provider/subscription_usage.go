@@ -202,7 +202,9 @@ type SubscriptionQuota struct {
 	// SharedBalance is set on each key of a provider found to read one
 	// account's balance with others (balance_shared.go): the name of the
 	// first of them, whose card shows it once for all
-	SharedBalance string `json:"sharedBalance,omitempty"`
+	SharedBalance      string `json:"sharedBalance,omitempty"`
+	BalanceWallet      string `json:"balanceWallet,omitempty"`
+	balanceWalletStamp string
 	// Until is when the plan's paid time ends: it renews then when Renew
 	// is "auto", is over when "off", and either when "" (the vendor
 	// doesn't say which).

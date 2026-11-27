@@ -3711,6 +3711,7 @@ func providerRoutes(mux *http.ServeMux, w Windows) {
 			// a blank token keeps the saved one, Clear drops both
 			Token, User string
 			Clear       bool
+			Wallet      *string
 		}
 		var added, had, removed int
 		if err := json.NewDecoder(r.Body).Decode(&in); err != nil {
@@ -3754,7 +3755,11 @@ func providerRoutes(mux *http.ServeMux, w Windows) {
 		case "balance":
 			// the access token and user id of the account the key is
 			// of, where it isn't the provider's (key_balance_auth.go)
-			err = provider.SetKeyBalanceAuth(in.ID, in.Ref, in.Token, in.User, in.Clear)
+			if in.Wallet != nil {
+				err = provider.SetKeyBalanceWallet(in.ID, in.Ref, *in.Wallet)
+			} else {
+				err = provider.SetKeyBalanceAuth(in.ID, in.Ref, in.Token, in.User, in.Clear)
+			}
 		case "on", "off":
 			moved, err = agent.Reseat(func() error { return provider.SetKeyOn(in.ID, in.Ref, r.PathValue("action") == "on") })
 		default:

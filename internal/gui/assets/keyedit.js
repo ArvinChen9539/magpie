@@ -41,12 +41,12 @@ function balanceAuth(p, k, cancel) {
   const user = input(a?.user || "", t("User ID"));
   user.inputMode = "numeric";
   user.setAttribute("aria-label", t("User ID"));
-  const tok = input("", t(a ? "Access token saved" : "Access token"), "password");
+  const tok = input("", t(a?.token ? "Access token saved" : "Access token"), "password");
   tok.setAttribute("aria-label", t("Access token"));
   tok.title = t("The access token of the account this key belongs to, from the site's personal settings: this key's balance is read with it");
   const save = el("button", "text primary", t("Save"));
   const go = () => {
-    if (!tok.value.trim() && !a) return tok.focus(NO_SCROLL);
+    if (!tok.value.trim() && !a?.token) return tok.focus(NO_SCROLL);
     save.classList.add("busy");
     accountAction("keys/balance", { id: p.id, ref: k.id, token: tok.value, user: user.value }, t("{key}'s balance is read with its own access token", { key: who }));
   };
@@ -54,12 +54,24 @@ function balanceAuth(p, k, cancel) {
   for (const f of [user, tok]) f.onkeydown = (e) => { e.stopPropagation(); if (e.key === "Enter") go(); else if (e.key === "Escape") cancel(); };
   const inner = el("div", "inner");
   inner.append(user, tok, save);
-  if (a) {
+  if (a?.token) {
     const rm = el("button", "text quiet", t("Remove"));
     rm.onclick = () => accountAction("keys/balance", { id: p.id, ref: k.id, clear: true }, t("{key}'s balance is read as the provider's", { key: who }));
     inner.append(rm);
   }
-  box.append(inner);
+  const wallet = input(a?.wallet || "", t("Shared wallet"));
+  wallet.setAttribute("aria-label", t("Shared wallet"));
+  wallet.title = t("Use the same name on keys that read the same wallet on this service. Clear it to unlink.");
+  const saveWallet = el("button", "text primary", t("Save shared wallet"));
+  saveWallet.onclick = () => accountAction("keys/balance", { id: p.id, ref: k.id, wallet: wallet.value }, t("Saved"));
+  wallet.onkeydown = (e) => {
+    e.stopPropagation();
+    if (e.key === "Enter") saveWallet.click();
+    else if (e.key === "Escape") cancel();
+  };
+  const binding = el("div", "inner");
+  binding.append(wallet, saveWallet);
+  box.append(inner, binding);
   // a click on the fold's summary or buttons keeps the focus where it is,
   // so the key's box doesn't close under it; its fields take it
   box.onmousedown = (e) => e.target.closest("input") || e.preventDefault();

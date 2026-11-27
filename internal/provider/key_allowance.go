@@ -305,7 +305,7 @@ func keyWindows(ctx context.Context, p Provider) (keyReading, error) {
 		return r, nil
 	}
 	var parts []BalancePart
-	r.balance, parts, r.split, r.ws, _, _, err = balanceRead(ctx, q)
+	r.balance, parts, r.split, r.ws, _, _, err = balanceRead(ctx, q, nil)
 	r.parts = cardParts(parts)
 	return r, err
 }

@@ -60,7 +60,7 @@ func movedTogether(a, b []BalancePoint) bool {
 // sharesAccountBalance says q is a key's card whose balance, read just
 // now, is its account's: one amount, nothing kept from before.
 func sharesAccountBalance(q SubscriptionQuota) bool {
-	return q.wideBalance && q.User != "" && q.Balance != "" && q.Error == "" && q.AsOf == nil &&
+	return q.BalanceWallet == "" && q.wideBalance && q.User != "" && q.Balance != "" && q.Error == "" && q.AsOf == nil &&
 		len(q.BalanceParts) == 0 && balanceCurrencies(q.Balance) == nil
 }
 

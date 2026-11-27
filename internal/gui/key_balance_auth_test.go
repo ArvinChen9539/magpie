@@ -85,8 +85,20 @@ func TestKeysBalanceAuth(t *testing.T) {
 			t.Fatalf("%s taken", body)
 		}
 	}
+	if w := do("POST", "/api/keys/balance", `{"id":"relay","ref":"`+b+`","wallet":"Team wallet"}`); w.Code != 200 {
+		t.Fatalf("binding: %d %s", w.Code, w.Body)
+	}
+	if p, _ := provider.Find("relay"); p.KeyBalanceAuth[b] != (provider.KeyBalanceAuth{Token: "tok-b", User: "2", Wallet: "Team wallet"}) {
+		t.Fatalf("binding changed the query credentials: %+v", p.KeyBalanceAuth[b])
+	}
 	if w := do("POST", "/api/keys/balance", `{"id":"relay","ref":"`+b+`","clear":true}`); w.Code != 200 {
 		t.Fatalf("%d %s", w.Code, w.Body)
+	}
+	if p, _ := provider.Find("relay"); p.KeyBalanceAuth[b] != (provider.KeyBalanceAuth{Wallet: "Team wallet"}) {
+		t.Fatalf("clearing the credentials changed the binding: %+v", p.KeyBalanceAuth[b])
+	}
+	if w := do("POST", "/api/keys/balance", `{"id":"relay","ref":"`+b+`","wallet":""}`); w.Code != 200 {
+		t.Fatalf("unlink: %d %s", w.Code, w.Body)
 	}
 	if p, _ := provider.Find("relay"); p.KeyBalanceAuth != nil {
 		t.Fatalf("clear left %+v", p.KeyBalanceAuth)

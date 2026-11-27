@@ -27,8 +27,9 @@ type lastQuotasT struct {
 }
 
 type lastQuota struct {
-	At time.Time         `json:"at"`
-	Q  SubscriptionQuota `json:"quota"`
+	At          time.Time         `json:"at"`
+	Q           SubscriptionQuota `json:"quota"`
+	WalletStamp string            `json:"walletStamp,omitempty"`
 	// what the windows' json leaves out, for routing
 	Spans []lastWindow `json:"spans,omitempty"`
 }
@@ -88,6 +89,9 @@ func keepLast(q SubscriptionQuota, user string) SubscriptionQuota {
 			return q
 		}
 		e := lastQuota{At: time.Now(), Q: q}
+		if q.BalanceWallet != "" {
+			e.WalletStamp = q.balanceWalletStamp
+		}
 		for _, w := range q.Windows {
 			if w.matches != nil && w.models == nil && w.notModels == nil {
 				return q // a pool that can't be written down isn't kept
@@ -122,6 +126,9 @@ func keepLast(q SubscriptionQuota, user string) SubscriptionQuota {
 	out, ok := read(key)
 	if !ok {
 		return q
+	}
+	if out.BalanceWallet != "" && c.m[key].WalletStamp != q.balanceWalletStamp {
+		out.BalanceWallet = ""
 	}
 	out.ReadDeferred = readDeferred(q.Error)
 	if !out.ReadDeferred {

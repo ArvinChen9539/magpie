@@ -31,7 +31,7 @@ const quotas = () => [
   key("panel", "Panel", "t2"),
 ];
 
-function serve(lang) {
+function serve(lang, readings = quotas()) {
   const settings = { theme: "light", lang, tray: "panel", quotaLeft: false, currency: "usd" };
   return async (route) => {
     const url = new URL(route.request().url());
@@ -41,7 +41,7 @@ function serve(lang) {
     if (url.pathname === "/api/state") return json({ agents: [], profiles: [], settings });
     if (url.pathname === "/api/settings") return json(settings);
     if (url.pathname === "/api/providers") return json({ providers: [], presets: [], excluded: [], gateway: { running: true, window: true } });
-    if (url.pathname === "/api/usage/quotas") return json(quotas());
+    if (url.pathname === "/api/usage/quotas") return json(readings);
     if (url.pathname === "/api/groups") return json({ groups: [], models: [] });
     if (url.pathname === "/api/plugins") return json({ plugins: [] });
     if (url.pathname.startsWith("/api/")) return json({});
@@ -83,6 +83,38 @@ const fits = (page, key) => page.evaluate((key) => {
 }, key);
 
 for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium", "webkit"])) {
+  for (const lang of ["en", "zh", "zh-TW", "ja", "de"]) {
+    test(`${engine} ${lang}: a wallet shared across providers contributes one fresh balance`, async (t) => {
+      const browser = await (engine === "webkit" ? webkit.launch() : chromium.launch({ channel: "chromium" }));
+      t.after(() => browser.close());
+      const page = await browser.newPage({ viewport: { width: 900, height: 700 }, reducedMotion: "reduce" });
+      const same = { balanceWallet: "wallet-one" };
+      const readings = [
+        key("relay", "Relay", "Wallet key", { ...same, balance: "$11.00", asOf: iso(now - 3600e3) }),
+        key("relay", "Relay", "Wallet key two", { ...same, balance: "$10.00", readAt: iso(now - 60e3) }),
+        key("relay", "Relay", "Separate key quota", { balance: "$8.39" }),
+        key("sibling", "Sibling", "", same),
+        key("independent", "Independent", "", { balanceWallet: "wallet-two" }),
+        key("remote", "Remote", "", { ...same, from: "Other Magpie" }),
+      ];
+      await page.route("**/*", serve(lang, readings));
+      await page.goto("http://magpie.test/?view=usage");
+      await page.waitForSelector("#subscriptionUsage > [data-key=relay] .subscription-account .user", { state: "attached" });
+      const got = await cards(page);
+      assert.deepEqual(Object.keys(got).sort(), ["independent", "relay", "remote"]);
+      assert.equal(got.relay.balances, 2);
+      assert.match(got.relay.sum, lang === "de" ? /16,78/ : /16\.78/);
+      assert.match(got.relay.shared[0][1], /Wallet key two, Sibling/);
+      const projected = await page.evaluate((data) => ({
+        tray: panelPageCut(data).cards.map((q) => [q.provider, q.balance]),
+        hidden: panelPageCut(data, () => false, new Set(["relay"])).cards.map((q) => [q.provider, q.balance]),
+        peek: panelPageCut(data, (q) => q.provider === "sibling").cards.map((q) => [q.provider, q.balance]),
+      }), readings);
+      assert.deepEqual(projected.tray, [["relay", "$8.39"], ["relay", "$8.39"], ["independent", "$8.39"], ["remote", "$8.39"]]);
+      assert.deepEqual(projected.hidden, [["sibling", "$8.39"], ["independent", "$8.39"], ["remote", "$8.39"]]);
+      assert.equal(projected.peek.filter(([provider]) => provider === "sibling").length, 1);
+    });
+  }
   for (const lang of ["en", "zh"]) {
     const w = words[lang];
     test(`${engine} ${lang}: keys of one account show its balance once`, async (t) => {

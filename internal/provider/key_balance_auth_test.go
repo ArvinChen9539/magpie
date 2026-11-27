@@ -197,12 +197,12 @@ func TestUnlimitedNewAPIKey(t *testing.T) {
 	}))
 	defer srv.Close()
 	p := Provider{ID: "relay", Chat: srv.URL + "/v1", Key: "sk-told", BalanceURL: srv.URL + "/api/usage/token"}
-	amount, _, _, _, wide, ok, err := balanceRead(context.Background(), p)
+	amount, _, _, _, wide, ok, err := balanceRead(context.Background(), p, nil)
 	if err != nil || !ok || amount != "$8.00" || !wide {
 		t.Fatalf("told: %q wide=%v %v %v", amount, wide, ok, err)
 	}
 	p.Key = "sk-kept"
-	if amount, _, _, _, _, _, err := balanceRead(context.Background(), p); err == nil || !strings.Contains(err.Error(), "Allow querying user quota") {
+	if amount, _, _, _, _, _, err := balanceRead(context.Background(), p, nil); err == nil || !strings.Contains(err.Error(), "Allow querying user quota") {
 		t.Fatalf("kept: %q %v", amount, err)
 	}
 	// a field the user wrote is read as they wrote it

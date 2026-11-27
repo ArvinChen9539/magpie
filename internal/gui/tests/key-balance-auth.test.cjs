@@ -162,6 +162,19 @@ for (const engine of (process.env.BROWSER ? [process.env.BROWSER] : ["chromium",
         assert.deepEqual(errors, []);
       });
 
+      if (lang === "en") test(`${engine} ${lang} ${width}px: bind a shared wallet without an access token`, async (t) => {
+        const { page, errors, posts, row } = await open(t, "key-balance-wallet", "bbbbbbbbbb");
+        const fold = row.locator("details.key-bal-auth");
+        await fold.locator("summary").click();
+        const field = fold.getByRole("textbox", { name: "Shared wallet", exact: true });
+        await field.fill("Team wallet");
+        await fold.getByRole("button", { name: "Save shared wallet", exact: true }).click();
+        await posted(page, posts);
+        assert.deepEqual(posts, [{ path: "/api/keys/balance", id: "relay", ref: "bbbbbbbbbb", wallet: "Team wallet" }]);
+        assert(!(await sideways(page)), "the wallet binding scrolls the page sideways");
+        assert.deepEqual(errors, []);
+      });
+
       test(`${engine} ${lang} ${width}px: a provider reading no balance has no fold under Change key`, async (t) => {
         const { page, errors, posts, row } = await open(t, "key-balance-auth-none", "bbbbbbbbbb", false);
         assert.equal(await row.locator("details.key-bal-auth").count(), 0);

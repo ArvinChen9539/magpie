@@ -22,16 +22,18 @@ import (
 // the provider's BalanceToken is another account's: the account's access
 // token, and for a new-api relay the user's id, sent in New-Api-User.
 type KeyBalanceAuth struct {
-	Token string `json:"token"`
-	User  string `json:"user,omitempty"`
+	Token  string `json:"token"`
+	User   string `json:"user,omitempty"`
+	Wallet string `json:"wallet,omitempty"`
 }
 
 // KeyBalanceAuthInfo is a key's own balance query as its row tells it:
 // the user id, and whether a token is saved (the token itself never goes
 // back to the page).
 type KeyBalanceAuthInfo struct {
-	User  string `json:"user,omitempty"`
-	Token bool   `json:"token"`
+	User   string `json:"user,omitempty"`
+	Token  bool   `json:"token"`
+	Wallet string `json:"wallet,omitempty"`
 }
 
 // keyBalanceAuthOf is the key's own balance query, by its KeyID.
@@ -46,11 +48,11 @@ func (p Provider) keyBalanceAuthOf(key string) (KeyBalanceAuth, bool) {
 // keyBalanceAuthInfo is the key's own balance query for its row; nil with
 // none.
 func (p Provider) keyBalanceAuthInfo(key string) *KeyBalanceAuthInfo {
-	a, ok := p.keyBalanceAuthOf(key)
+	a, ok := p.KeyBalanceAuth[keyID(key)]
 	if !ok {
 		return nil
 	}
-	return &KeyBalanceAuthInfo{User: a.User, Token: true}
+	return &KeyBalanceAuthInfo{User: a.User, Token: a.Token != "", Wallet: a.Wallet}
 }
 
 // TakesKeyBalanceAuth says a key of p can carry its own balance query: a
@@ -74,6 +76,14 @@ func TakesKeyBalanceAuth(p Provider) bool {
 // token keeps the saved one, so the user id alone can be changed; clear
 // drops both, and the key is asked as the provider's other keys are.
 func SetKeyBalanceAuth(id, ref, token, user string, clear bool) error {
+	return setKeyBalanceAuth(id, ref, token, user, clear, nil)
+}
+
+func SetKeyBalanceWallet(id, ref, wallet string) error {
+	return setKeyBalanceAuth(id, ref, "", "", false, &wallet)
+}
+
+func setKeyBalanceAuth(id, ref, token, user string, clear bool, wallet *string) error {
 	p, err := Find(id)
 	if err != nil {
 		return err
@@ -90,13 +100,15 @@ func SetKeyBalanceAuth(id, ref, token, user string, clear bool) error {
 	if m == nil {
 		m = map[string]KeyBalanceAuth{}
 	}
-	if clear {
-		if _, had := m[k]; !had {
-			return nil
+	a := m[k]
+	if wallet != nil {
+		a.Wallet = strings.TrimSpace(*wallet)
+		if len(a.Wallet) > 128 {
+			return fmt.Errorf("the shared wallet name must be at most 128 bytes")
 		}
-		delete(m, k)
+	} else if clear {
+		a.Token, a.User = "", ""
 	} else {
-		a := m[k]
 		if t := strings.TrimSpace(token); t != "" {
 			a.Token = t
 		}
@@ -107,8 +119,11 @@ func SetKeyBalanceAuth(id, ref, token, user string, clear bool) error {
 		if a.Token == "" {
 			return fmt.Errorf("paste the access token of the account this key belongs to")
 		}
-		m[k] = a
 	}
+	if a == m[k] {
+		return nil
+	}
+	m[k] = a
 	p.KeyBalanceAuth = m
 	if err := Save(*p); err != nil {
 		return err
@@ -135,8 +150,11 @@ func normalKeyBalanceAuth(m map[string]KeyBalanceAuth, p Provider) map[string]Ke
 	var out map[string]KeyBalanceAuth
 	for k, a := range m {
 		k = strings.ToLower(strings.TrimSpace(k))
-		a.Token, a.User = strings.TrimSpace(a.Token), strings.TrimSpace(a.User)
-		if !have[k] || a.Token == "" {
+		a.Token, a.User, a.Wallet = strings.TrimSpace(a.Token), strings.TrimSpace(a.User), strings.TrimSpace(a.Wallet)
+		if a.Token == "" {
+			a.User = ""
+		}
+		if !have[k] || (a.Token == "" && a.Wallet == "") {
 			continue
 		}
 		if out == nil {
